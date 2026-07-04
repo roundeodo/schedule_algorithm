@@ -1,0 +1,54 @@
+  [500/10000]  mean=0.9961  worse=41  elapsed=1040s  ETA=19754s
+  [1000/10000]  mean=0.9963  worse=79  elapsed=1933s  ETA=17399s
+  [1500/10000]  mean=0.9973  worse=128  elapsed=2958s  ETA=16763s
+  [2000/10000]  mean=0.9969  worse=170  elapsed=3923s  ETA=15692s
+  [2500/10000]  mean=0.9967  worse=224  elapsed=4929s  ETA=14787s
+  [3000/10000]  mean=0.9971  worse=270  elapsed=5886s  ETA=13733s
+  [3500/10000]  mean=0.9969  worse=304  elapsed=6796s  ETA=12622s
+  [4000/10000]  mean=0.9971  worse=347  elapsed=7660s  ETA=11490s
+  [4500/10000]  mean=0.9974  worse=402  elapsed=8573s  ETA=10478s
+  [5000/10000]  mean=0.9975  worse=448  elapsed=9518s  ETA=9518s
+  [5500/10000]  mean=0.9975  worse=492  elapsed=10426s  ETA=8531s
+  [6000/10000]  mean=0.9976  worse=540  elapsed=11439s  ETA=7626s
+  [6500/10000]  mean=0.9975  worse=588  elapsed=12417s  ETA=6686s
+  [7000/10000]  mean=0.9975  worse=626  elapsed=13377s  ETA=5733s
+  [7500/10000]  mean=0.9972  worse=663  elapsed=14373s  ETA=4791s
+  [8000/10000]  mean=0.9972  worse=713  elapsed=15394s  ETA=3848s
+  [8500/10000]  mean=0.9973  worse=762  elapsed=16327s  ETA=2881s
+  [9000/10000]  mean=0.9973  worse=805  elapsed=17241s  ETA=1916s
+  [9500/10000]  mean=0.9974  worse=852  elapsed=18130s  ETA=954s
+  [10000/10000]  mean=0.9975  worse=910  elapsed=19051s  ETA=0s
+
+============================================================
+N_SAMPLES=10000  valid=10000  skipped_beam=0  skipped_anal=0
+Total time: 19050.6s  (1905.1ms/call)
+
+mean_ratio = 0.9975
+median     = 1.0000
+pct_optimal (ratio=1.0) = 75.0%
+within  5% = 93.6%
+within 10% = 97.0%
+p95 = 1.0667  p99 = 1.1538  max = 1.3125
+worse_than_BW64 = 910  better = 1586
+
+Top-10 worst cases:
+  i= 9600 ratio=1.312 ntoks=[13, 1, 1, 1] c2=-1 c3=-1 beam=180224 anal=236544
+  i= 9185 ratio=1.312 ntoks=[13, 1, 1, 1] c2=-1 c3=-1 beam=180224 anal=236544
+  i= 9012 ratio=1.312 ntoks=[13, 1, 1, 1] c2=-1 c3=-1 beam=180224 anal=236544
+  i= 8385 ratio=1.312 ntoks=[13, 1, 1, 1] c2=-1 c3=-1 beam=180224 anal=236544
+  i= 8287 ratio=1.312 ntoks=[13, 1, 1, 1] c2=-1 c3=-1 beam=180224 anal=236544
+  i= 8087 ratio=1.312 ntoks=[13, 1, 1, 1] c2=-1 c3=-1 beam=180224 anal=236544
+  i= 7850 ratio=1.312 ntoks=[13, 1, 1, 1] c2=-1 c3=-1 beam=180224 anal=236544
+  i= 6255 ratio=1.312 ntoks=[13, 1, 1, 1] c2=-1 c3=-1 beam=180224 anal=236544
+  i= 5994 ratio=1.312 ntoks=[13, 1, 1, 1] c2=-1 c3=-1 beam=180224 anal=236544
+  i= 2875 ratio=1.312 ntoks=[13, 1, 1, 1] c2=-1 c3=-1 beam=180224 anal=236544
+
+Breakdown by n_experts:
+  n=1: count=2065  mean=1.0000  worse=0
+  n=2: count=1329  mean=0.9881  worse=6
+  n=3: count=1309  mean=1.0150  worse=200
+  n=4: count=1235  mean=1.0070  worse=195
+  n=5: count=1002  mean=0.9794  worse=55
+  n=6: count=1014  mean=0.9976  worse=146
+  n=7: count=1018  mean=0.9895  worse=169
+  n=8: count=1028  mean=0.9966  worse=139

@@ -1,0 +1,315 @@
+{
+  "sample_per_file": -1,
+  "checked_cases": 30000,
+  "mirror_mismatches": 0,
+  "overall": {
+    "n_events": 334899,
+    "pattern": {
+      "both": 58887,
+      "b_only": 6014,
+      "none": 170097,
+      "single_pf": 95746,
+      "a_only": 4155
+    },
+    "family": {
+      "split_top0": 11173,
+      "pair_kj": 105057,
+      "n1_split": 5489,
+      "pair_top0_topk": 75938,
+      "single_idle": 137242
+    },
+    "side_category": {
+      "dma1_end": 54019,
+      "task_start": 53813,
+      "latest": 115857
+    },
+    "pattern_by_family": {
+      "split_top0": {
+        "both": 7478,
+        "b_only": 2826,
+        "none": 114,
+        "a_only": 755
+      },
+      "pair_kj": {
+        "both": 33108,
+        "none": 68790,
+        "a_only": 2123,
+        "b_only": 1036
+      },
+      "n1_split": {
+        "both": 3456,
+        "none": 1350,
+        "b_only": 585,
+        "a_only": 98
+      },
+      "pair_top0_topk": {
+        "b_only": 1567,
+        "none": 58347,
+        "both": 14845,
+        "a_only": 1179
+      },
+      "single_idle": {
+        "single_pf": 95746,
+        "none": 41496
+      }
+    },
+    "side_category_by_family": {
+      "split_top0": {
+        "dma1_end": 10589,
+        "task_start": 3948,
+        "latest": 4000
+      },
+      "pair_kj": {
+        "task_start": 33027,
+        "latest": 9272,
+        "dma1_end": 27076
+      },
+      "n1_split": {
+        "latest": 1163,
+        "dma1_end": 2015,
+        "task_start": 4417
+      },
+      "pair_top0_topk": {
+        "dma1_end": 14339,
+        "task_start": 12421,
+        "latest": 5676
+      },
+      "single_idle": {
+        "latest": 95746
+      }
+    }
+  },
+  "by_file": {
+    "scheduler_eval_inputs_E8_stratified_v6.json": {
+      "n_events": 28000,
+      "pattern": {
+        "both": 9992,
+        "b_only": 2526,
+        "none": 5919,
+        "single_pf": 8635,
+        "a_only": 928
+      },
+      "family": {
+        "split_top0": 3468,
+        "pair_kj": 5662,
+        "n1_split": 3083,
+        "pair_top0_topk": 6416,
+        "single_idle": 9371
+      },
+      "side_category": {
+        "dma1_end": 10449,
+        "task_start": 7373,
+        "latest": 14251
+      },
+      "pattern_by_family": {
+        "split_top0": {
+          "both": 1903,
+          "b_only": 1229,
+          "none": 77,
+          "a_only": 259
+        },
+        "pair_kj": {
+          "both": 3119,
+          "none": 1969,
+          "a_only": 358,
+          "b_only": 216
+        },
+        "n1_split": {
+          "both": 2139,
+          "none": 459,
+          "b_only": 428,
+          "a_only": 57
+        },
+        "pair_top0_topk": {
+          "b_only": 653,
+          "none": 2678,
+          "both": 2831,
+          "a_only": 254
+        },
+        "single_idle": {
+          "single_pf": 8635,
+          "none": 736
+        }
+      },
+      "side_category_by_family": {
+        "split_top0": {
+          "dma1_end": 2655,
+          "task_start": 1455,
+          "latest": 1184
+        },
+        "pair_kj": {
+          "task_start": 2252,
+          "latest": 1904,
+          "dma1_end": 2656
+        },
+        "n1_split": {
+          "latest": 699,
+          "dma1_end": 1394,
+          "task_start": 2670
+        },
+        "pair_top0_topk": {
+          "dma1_end": 3744,
+          "task_start": 996,
+          "latest": 1829
+        },
+        "single_idle": {
+          "latest": 8635
+        }
+      }
+    },
+    "scheduler_eval_inputs_E32_stratified_v6.json": {
+      "n_events": 105510,
+      "pattern": {
+        "both": 20968,
+        "a_only": 1458,
+        "none": 45209,
+        "single_pf": 36077,
+        "b_only": 1798
+      },
+      "family": {
+        "pair_kj": 31854,
+        "split_top0": 3888,
+        "n1_split": 1495,
+        "pair_top0_topk": 20815,
+        "single_idle": 47458
+      },
+      "side_category": {
+        "dma1_end": 17685,
+        "task_start": 20255,
+        "latest": 43329
+      },
+      "pattern_by_family": {
+        "pair_kj": {
+          "both": 12474,
+          "a_only": 751,
+          "none": 18275,
+          "b_only": 354
+        },
+        "split_top0": {
+          "both": 2745,
+          "b_only": 876,
+          "a_only": 241,
+          "none": 26
+        },
+        "n1_split": {
+          "both": 888,
+          "none": 482,
+          "b_only": 99,
+          "a_only": 26
+        },
+        "pair_top0_topk": {
+          "none": 15045,
+          "both": 4861,
+          "a_only": 440,
+          "b_only": 469
+        },
+        "single_idle": {
+          "single_pf": 36077,
+          "none": 11381
+        }
+      },
+      "side_category_by_family": {
+        "pair_kj": {
+          "dma1_end": 8765,
+          "task_start": 13637,
+          "latest": 3651
+        },
+        "split_top0": {
+          "task_start": 1481,
+          "latest": 1432,
+          "dma1_end": 3694
+        },
+        "n1_split": {
+          "latest": 306,
+          "dma1_end": 407,
+          "task_start": 1188
+        },
+        "pair_top0_topk": {
+          "task_start": 3949,
+          "latest": 1863,
+          "dma1_end": 4819
+        },
+        "single_idle": {
+          "latest": 36077
+        }
+      }
+    },
+    "scheduler_eval_inputs_E64_stratified_v6.json": {
+      "n_events": 201389,
+      "pattern": {
+        "a_only": 1769,
+        "both": 27927,
+        "single_pf": 51034,
+        "none": 118969,
+        "b_only": 1690
+      },
+      "family": {
+        "split_top0": 3817,
+        "pair_top0_topk": 48707,
+        "single_idle": 80413,
+        "pair_kj": 67541,
+        "n1_split": 911
+      },
+      "side_category": {
+        "dma1_end": 25885,
+        "task_start": 26185,
+        "latest": 58277
+      },
+      "pattern_by_family": {
+        "split_top0": {
+          "a_only": 255,
+          "both": 2830,
+          "b_only": 721,
+          "none": 11
+        },
+        "pair_top0_topk": {
+          "both": 7153,
+          "none": 40624,
+          "a_only": 485,
+          "b_only": 445
+        },
+        "single_idle": {
+          "single_pf": 51034,
+          "none": 29379
+        },
+        "pair_kj": {
+          "both": 17515,
+          "none": 48546,
+          "a_only": 1014,
+          "b_only": 466
+        },
+        "n1_split": {
+          "none": 409,
+          "both": 429,
+          "b_only": 58,
+          "a_only": 15
+        }
+      },
+      "side_category_by_family": {
+        "split_top0": {
+          "dma1_end": 4240,
+          "latest": 1384,
+          "task_start": 1012
+        },
+        "pair_top0_topk": {
+          "task_start": 7476,
+          "latest": 1984,
+          "dma1_end": 5776
+        },
+        "single_idle": {
+          "latest": 51034
+        },
+        "pair_kj": {
+          "dma1_end": 15655,
+          "latest": 3717,
+          "task_start": 17138
+        },
+        "n1_split": {
+          "task_start": 559,
+          "dma1_end": 214,
+          "latest": 158
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,39 @@
+  [1000/10000] elapsed=120s  mean=0.782
+  [2000/10000] elapsed=244s  mean=0.778
+  [3000/10000] elapsed=364s  mean=0.773
+  [4000/10000] elapsed=480s  mean=0.773
+  [5000/10000] elapsed=607s  mean=0.775
+  [6000/10000] elapsed=732s  mean=0.775
+  [7000/10000] elapsed=853s  mean=0.773
+  [8000/10000] elapsed=975s  mean=0.772
+  [9000/10000] elapsed=1105s  mean=0.774
+  [10000/10000] elapsed=1242s  mean=0.775
+
+Done 1242s
+
+=== Anal makespan / Shared-Expert LB (LB = 33792 * ceil(N/2)) ===
+mean   = 0.775
+median = 0.625
+min    = 0.500   max = 2.000
+p25=0.500  p75=1.000  p95=1.583  p99=2.000
+
+By n_experts:
+  n=1: count=2065  mean=0.578  median=0.500  max=1.000
+  n=2: count=1329  mean=0.651  median=0.562  max=1.000
+  n=3: count=1309  mean=0.790  median=0.625  max=1.500
+  n=4: count=1235  mean=0.909  median=0.625  max=2.000
+  n=5: count=1002  mean=0.749  median=0.667  max=1.250
+  n=6: count=1014  mean=0.815  median=0.694  max=1.500
+  n=7: count=1018  mean=0.905  median=0.764  max=1.750
+  n=8: count=1028  mean=1.008  median=0.833  max=2.000
+
+By N_total tokens:
+  N=  4: count=1192  mean=1.262  median=1.000  max=2.000
+  N=  8: count=1208  mean=1.109  median=1.083  max=2.000
+  N=  9: count=  23  mean=1.371  median=1.400  max=1.400
+  N= 12: count=1260  mean=0.855  median=0.833  max=1.389
+  N= 16: count=1262  mean=0.733  median=0.667  max=1.208
+  N= 24: count=1249  mean=0.615  median=0.583  max=0.917
+  N= 32: count=1232  mean=0.584  median=0.562  max=0.812
+  N= 48: count=1297  mean=0.544  median=0.542  max=0.708
+  N= 64: count=1277  mean=0.533  median=0.531  max=0.656

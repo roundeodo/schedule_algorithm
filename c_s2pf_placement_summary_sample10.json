@@ -1,0 +1,277 @@
+{
+  "sample_per_file": 10,
+  "checked_cases": 30,
+  "mirror_mismatches": 0,
+  "overall": {
+    "n_events": 294,
+    "pattern": {
+      "both": 62,
+      "none": 102,
+      "b_only": 6,
+      "single_pf": 120,
+      "a_only": 4
+    },
+    "family": {
+      "split_top0": 19,
+      "pair_kj": 80,
+      "n1_split": 3,
+      "pair_top0_topk": 44,
+      "single_idle": 148
+    },
+    "side_category": {
+      "dma1_end": 57,
+      "task_start": 51,
+      "latest": 146
+    },
+    "pattern_by_family": {
+      "split_top0": {
+        "both": 15,
+        "b_only": 3,
+        "a_only": 1
+      },
+      "pair_kj": {
+        "both": 32,
+        "none": 46,
+        "a_only": 1,
+        "b_only": 1
+      },
+      "n1_split": {
+        "both": 3
+      },
+      "pair_top0_topk": {
+        "none": 28,
+        "b_only": 2,
+        "both": 12,
+        "a_only": 2
+      },
+      "single_idle": {
+        "single_pf": 120,
+        "none": 28
+      }
+    },
+    "side_category_by_family": {
+      "split_top0": {
+        "dma1_end": 17,
+        "task_start": 13,
+        "latest": 4
+      },
+      "pair_kj": {
+        "task_start": 23,
+        "latest": 14,
+        "dma1_end": 29
+      },
+      "n1_split": {
+        "latest": 2,
+        "dma1_end": 2,
+        "task_start": 2
+      },
+      "pair_top0_topk": {
+        "dma1_end": 9,
+        "task_start": 13,
+        "latest": 6
+      },
+      "single_idle": {
+        "latest": 120
+      }
+    }
+  },
+  "by_file": {
+    "scheduler_eval_inputs_E8_stratified_v6.json": {
+      "n_events": 37,
+      "pattern": {
+        "both": 17,
+        "none": 9,
+        "b_only": 2,
+        "single_pf": 9
+      },
+      "family": {
+        "split_top0": 7,
+        "pair_kj": 7,
+        "n1_split": 2,
+        "pair_top0_topk": 11,
+        "single_idle": 10
+      },
+      "side_category": {
+        "dma1_end": 14,
+        "task_start": 15,
+        "latest": 16
+      },
+      "pattern_by_family": {
+        "split_top0": {
+          "both": 6,
+          "b_only": 1
+        },
+        "pair_kj": {
+          "both": 6,
+          "none": 1
+        },
+        "n1_split": {
+          "both": 2
+        },
+        "pair_top0_topk": {
+          "none": 7,
+          "b_only": 1,
+          "both": 3
+        },
+        "single_idle": {
+          "single_pf": 9,
+          "none": 1
+        }
+      },
+      "side_category_by_family": {
+        "split_top0": {
+          "dma1_end": 4,
+          "task_start": 8,
+          "latest": 1
+        },
+        "pair_kj": {
+          "task_start": 4,
+          "latest": 4,
+          "dma1_end": 4
+        },
+        "n1_split": {
+          "latest": 1,
+          "dma1_end": 1,
+          "task_start": 2
+        },
+        "pair_top0_topk": {
+          "dma1_end": 5,
+          "task_start": 1,
+          "latest": 1
+        },
+        "single_idle": {
+          "latest": 9
+        }
+      }
+    },
+    "scheduler_eval_inputs_E32_stratified_v6.json": {
+      "n_events": 116,
+      "pattern": {
+        "both": 24,
+        "a_only": 2,
+        "none": 44,
+        "single_pf": 46
+      },
+      "family": {
+        "pair_kj": 30,
+        "split_top0": 6,
+        "n1_split": 1,
+        "single_idle": 58,
+        "pair_top0_topk": 21
+      },
+      "side_category": {
+        "dma1_end": 24,
+        "task_start": 16,
+        "latest": 56
+      },
+      "pattern_by_family": {
+        "pair_kj": {
+          "both": 14,
+          "a_only": 1,
+          "none": 15
+        },
+        "split_top0": {
+          "both": 6
+        },
+        "n1_split": {
+          "both": 1
+        },
+        "single_idle": {
+          "single_pf": 46,
+          "none": 12
+        },
+        "pair_top0_topk": {
+          "none": 17,
+          "both": 3,
+          "a_only": 1
+        }
+      },
+      "side_category_by_family": {
+        "pair_kj": {
+          "dma1_end": 15,
+          "task_start": 9,
+          "latest": 5
+        },
+        "split_top0": {
+          "task_start": 5,
+          "latest": 2,
+          "dma1_end": 5
+        },
+        "n1_split": {
+          "latest": 1,
+          "dma1_end": 1
+        },
+        "single_idle": {
+          "latest": 46
+        },
+        "pair_top0_topk": {
+          "task_start": 2,
+          "dma1_end": 3,
+          "latest": 2
+        }
+      }
+    },
+    "scheduler_eval_inputs_E64_stratified_v6.json": {
+      "n_events": 141,
+      "pattern": {
+        "a_only": 2,
+        "both": 21,
+        "single_pf": 65,
+        "none": 49,
+        "b_only": 4
+      },
+      "family": {
+        "split_top0": 6,
+        "pair_top0_topk": 12,
+        "single_idle": 80,
+        "pair_kj": 43
+      },
+      "side_category": {
+        "dma1_end": 19,
+        "task_start": 20,
+        "latest": 74
+      },
+      "pattern_by_family": {
+        "split_top0": {
+          "a_only": 1,
+          "both": 3,
+          "b_only": 2
+        },
+        "pair_top0_topk": {
+          "both": 6,
+          "none": 4,
+          "b_only": 1,
+          "a_only": 1
+        },
+        "single_idle": {
+          "single_pf": 65,
+          "none": 15
+        },
+        "pair_kj": {
+          "none": 30,
+          "both": 12,
+          "b_only": 1
+        }
+      },
+      "side_category_by_family": {
+        "split_top0": {
+          "dma1_end": 8,
+          "latest": 1
+        },
+        "pair_top0_topk": {
+          "task_start": 10,
+          "latest": 3,
+          "dma1_end": 1
+        },
+        "single_idle": {
+          "latest": 65
+        },
+        "pair_kj": {
+          "dma1_end": 10,
+          "latest": 5,
+          "task_start": 10
+        }
+      }
+    }
+  }
+}

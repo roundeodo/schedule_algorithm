@@ -1,0 +1,42 @@
+committed_top_level_events=353493
+
+family:
+  single_idle          137242  38.82%
+  pair_kj              105057  29.72%
+  pair_top0_topk        75938  21.48%
+  n1_solo               17090   4.83%
+  split_top0            11173   3.16%
+  n1_split               5489   1.55%
+  n1_early               1504   0.43%
+
+pair_top0_k:
+  1                     75866  99.91%
+  2                        38   0.05%
+  3                        34   0.04%
+
+pair_top0_direction:
+  top0_c2               75364  99.24%
+  top0_c3                 574   0.76%
+
+pair_kj_combo:
+  2,3                   68395  65.10%
+  1,2                   36644  34.88%
+  1,3                      18   0.02%
+
+pair_kj_direction:
+  k_c2                 104677  99.64%
+  k_c3                    380   0.36%
+
+split_cut_kind:
+  half_ceil             14254  85.55%
+  front_m2               1491   8.95%
+  front_m8                582   3.49%
+  front_m4                335   2.01%
+
+single_start_kind:
+  idle_t                81341  58.63%
+  busy_release_2        28848  20.79%
+  busy_release_1        28557  20.58%
+
+checked_cases=30000 mirror_mismatches=0
+wrote Idea_Model/c_top_level_candidate_summary_full.json

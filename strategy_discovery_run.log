@@ -1,0 +1,401 @@
+RUN case_id=642 variant=two_tiny tokens=[48, 47, 33, 32, 1, 1] cache=medium_pair
+OK case_id=642 analytical=1419264 beam=1453056 ideal=1368576 analytical_minus_beam=-33792 beam_over_ideal=1.061728 beam_s=229.861
+SAVED completed=643 pending=132 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=643 variant=two_tiny tokens=[48, 47, 33, 32, 1, 1] cache=hot0
+OK case_id=643 analytical=1419264 beam=1453056 ideal=1368576 analytical_minus_beam=-33792 beam_over_ideal=1.061728 beam_s=229.296
+SAVED completed=644 pending=131 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=644 variant=two_tiny tokens=[48, 47, 33, 32, 1, 1] cache=medium0
+OK case_id=644 analytical=1419264 beam=1453056 ideal=1368576 analytical_minus_beam=-33792 beam_over_ideal=1.061728 beam_s=223.720
+SAVED completed=645 pending=130 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=645 variant=asym_tiny tokens=[48, 46, 33, 31, 1] cache=none
+OK case_id=645 analytical=1419264 beam=1385472 ideal=1343232 analytical_minus_beam=33792 beam_over_ideal=1.031447 beam_s=190.539
+SAVED completed=646 pending=129 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=646 variant=asym_tiny tokens=[48, 46, 33, 31, 1] cache=hot_pair
+OK case_id=646 analytical=1385472 beam=1385472 ideal=1343232 analytical_minus_beam=0 beam_over_ideal=1.031447 beam_s=185.485
+SAVED completed=647 pending=128 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=647 variant=asym_tiny tokens=[48, 46, 33, 31, 1] cache=medium_pair
+OK case_id=647 analytical=1385472 beam=1385472 ideal=1343232 analytical_minus_beam=0 beam_over_ideal=1.031447 beam_s=171.850
+SAVED completed=648 pending=127 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=648 variant=asym_tiny tokens=[48, 46, 33, 31, 1] cache=hot0
+OK case_id=648 analytical=1385472 beam=1385472 ideal=1343232 analytical_minus_beam=0 beam_over_ideal=1.031447 beam_s=193.300
+SAVED completed=649 pending=126 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=649 variant=asym_tiny tokens=[48, 46, 33, 31, 1] cache=medium0
+OK case_id=649 analytical=1385472 beam=1385472 ideal=1343232 analytical_minus_beam=0 beam_over_ideal=1.031447 beam_s=177.346
+SAVED completed=650 pending=125 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=650 variant=no_tiny tokens=[64, 63, 23, 22] cache=none
+OK case_id=650 analytical=1486848 beam=1486848 ideal=1453056 analytical_minus_beam=0 beam_over_ideal=1.023256 beam_s=129.373
+SAVED completed=651 pending=124 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=651 variant=no_tiny tokens=[64, 63, 23, 22] cache=hot_pair
+OK case_id=651 analytical=1486848 beam=1486848 ideal=1453056 analytical_minus_beam=0 beam_over_ideal=1.023256 beam_s=120.575
+SAVED completed=652 pending=123 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=652 variant=no_tiny tokens=[64, 63, 23, 22] cache=medium_pair
+OK case_id=652 analytical=1486848 beam=1486848 ideal=1453056 analytical_minus_beam=0 beam_over_ideal=1.023256 beam_s=153.799
+SAVED completed=653 pending=122 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=653 variant=no_tiny tokens=[64, 63, 23, 22] cache=hot0
+OK case_id=653 analytical=1486848 beam=1486848 ideal=1453056 analytical_minus_beam=0 beam_over_ideal=1.023256 beam_s=126.236
+SAVED completed=654 pending=121 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=654 variant=no_tiny tokens=[64, 63, 23, 22] cache=medium0
+OK case_id=654 analytical=1486848 beam=1486848 ideal=1453056 analytical_minus_beam=0 beam_over_ideal=1.023256 beam_s=142.143
+SAVED completed=655 pending=120 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=655 variant=tiny1 tokens=[64, 63, 23, 22, 1] cache=none
+OK case_id=655 analytical=1486848 beam=1486848 ideal=1461504 analytical_minus_beam=0 beam_over_ideal=1.017341 beam_s=265.727
+SAVED completed=656 pending=119 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=656 variant=tiny1 tokens=[64, 63, 23, 22, 1] cache=hot_pair
+OK case_id=656 analytical=1486848 beam=1486848 ideal=1461504 analytical_minus_beam=0 beam_over_ideal=1.017341 beam_s=255.797
+SAVED completed=657 pending=118 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=657 variant=tiny1 tokens=[64, 63, 23, 22, 1] cache=medium_pair
+OK case_id=657 analytical=1486848 beam=1486848 ideal=1461504 analytical_minus_beam=0 beam_over_ideal=1.017341 beam_s=288.819
+SAVED completed=658 pending=117 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=658 variant=tiny1 tokens=[64, 63, 23, 22, 1] cache=hot0
+OK case_id=658 analytical=1486848 beam=1486848 ideal=1461504 analytical_minus_beam=0 beam_over_ideal=1.017341 beam_s=269.047
+SAVED completed=659 pending=116 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=659 variant=tiny1 tokens=[64, 63, 23, 22, 1] cache=medium0
+OK case_id=659 analytical=1486848 beam=1486848 ideal=1461504 analytical_minus_beam=0 beam_over_ideal=1.017341 beam_s=276.875
+SAVED completed=660 pending=115 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=660 variant=tiny2 tokens=[64, 63, 23, 22, 2] cache=none
+OK case_id=660 analytical=1486848 beam=1486848 ideal=1469952 analytical_minus_beam=0 beam_over_ideal=1.011494 beam_s=273.748
+SAVED completed=661 pending=114 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=661 variant=tiny2 tokens=[64, 63, 23, 22, 2] cache=hot_pair
+OK case_id=661 analytical=1486848 beam=1486848 ideal=1469952 analytical_minus_beam=0 beam_over_ideal=1.011494 beam_s=266.507
+SAVED completed=662 pending=113 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=662 variant=tiny2 tokens=[64, 63, 23, 22, 2] cache=medium_pair
+OK case_id=662 analytical=1486848 beam=1486848 ideal=1469952 analytical_minus_beam=0 beam_over_ideal=1.011494 beam_s=300.883
+SAVED completed=663 pending=112 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=663 variant=tiny2 tokens=[64, 63, 23, 22, 2] cache=hot0
+OK case_id=663 analytical=1486848 beam=1486848 ideal=1469952 analytical_minus_beam=0 beam_over_ideal=1.011494 beam_s=284.449
+SAVED completed=664 pending=111 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=664 variant=tiny2 tokens=[64, 63, 23, 22, 2] cache=medium0
+OK case_id=664 analytical=1486848 beam=1486848 ideal=1469952 analytical_minus_beam=0 beam_over_ideal=1.011494 beam_s=292.608
+SAVED completed=665 pending=110 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=665 variant=two_tiny tokens=[64, 63, 23, 22, 1, 1] cache=none
+OK case_id=665 analytical=1520640 beam=1554432 ideal=1469952 analytical_minus_beam=-33792 beam_over_ideal=1.057471 beam_s=352.437
+SAVED completed=666 pending=109 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=666 variant=two_tiny tokens=[64, 63, 23, 22, 1, 1] cache=hot_pair
+OK case_id=666 analytical=1520640 beam=1554432 ideal=1469952 analytical_minus_beam=-33792 beam_over_ideal=1.057471 beam_s=340.593
+SAVED completed=667 pending=108 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=667 variant=two_tiny tokens=[64, 63, 23, 22, 1, 1] cache=medium_pair
+OK case_id=667 analytical=1520640 beam=1554432 ideal=1469952 analytical_minus_beam=-33792 beam_over_ideal=1.057471 beam_s=348.166
+SAVED completed=668 pending=107 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=668 variant=two_tiny tokens=[64, 63, 23, 22, 1, 1] cache=hot0
+OK case_id=668 analytical=1520640 beam=1554432 ideal=1469952 analytical_minus_beam=-33792 beam_over_ideal=1.057471 beam_s=350.440
+SAVED completed=669 pending=106 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=669 variant=two_tiny tokens=[64, 63, 23, 22, 1, 1] cache=medium0
+OK case_id=669 analytical=1520640 beam=1554432 ideal=1469952 analytical_minus_beam=-33792 beam_over_ideal=1.057471 beam_s=357.274
+SAVED completed=670 pending=105 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=670 variant=asym_tiny tokens=[64, 62, 23, 21, 1] cache=none
+OK case_id=670 analytical=1486848 beam=1486848 ideal=1444608 analytical_minus_beam=0 beam_over_ideal=1.029240 beam_s=278.001
+SAVED completed=671 pending=104 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=671 variant=asym_tiny tokens=[64, 62, 23, 21, 1] cache=hot_pair
+OK case_id=671 analytical=1486848 beam=1486848 ideal=1444608 analytical_minus_beam=0 beam_over_ideal=1.029240 beam_s=247.534
+SAVED completed=672 pending=103 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=672 variant=asym_tiny tokens=[64, 62, 23, 21, 1] cache=medium_pair
+OK case_id=672 analytical=1486848 beam=1486848 ideal=1444608 analytical_minus_beam=0 beam_over_ideal=1.029240 beam_s=271.085
+SAVED completed=673 pending=102 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=673 variant=asym_tiny tokens=[64, 62, 23, 21, 1] cache=hot0
+OK case_id=673 analytical=1486848 beam=1486848 ideal=1444608 analytical_minus_beam=0 beam_over_ideal=1.029240 beam_s=263.057
+SAVED completed=674 pending=101 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=674 variant=asym_tiny tokens=[64, 62, 23, 21, 1] cache=medium0
+OK case_id=674 analytical=1486848 beam=1486848 ideal=1444608 analytical_minus_beam=0 beam_over_ideal=1.029240 beam_s=261.357
+SAVED completed=675 pending=100 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=675 variant=no_tiny tokens=[64, 63, 24, 23] cache=none
+OK case_id=675 analytical=1486848 beam=1486848 ideal=1469952 analytical_minus_beam=0 beam_over_ideal=1.011494 beam_s=152.694
+SAVED completed=676 pending=99 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=676 variant=no_tiny tokens=[64, 63, 24, 23] cache=hot_pair
+OK case_id=676 analytical=1486848 beam=1486848 ideal=1469952 analytical_minus_beam=0 beam_over_ideal=1.011494 beam_s=141.023
+SAVED completed=677 pending=98 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=677 variant=no_tiny tokens=[64, 63, 24, 23] cache=medium_pair
+OK case_id=677 analytical=1486848 beam=1486848 ideal=1469952 analytical_minus_beam=0 beam_over_ideal=1.011494 beam_s=141.225
+SAVED completed=678 pending=97 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=678 variant=no_tiny tokens=[64, 63, 24, 23] cache=hot0
+OK case_id=678 analytical=1486848 beam=1486848 ideal=1469952 analytical_minus_beam=0 beam_over_ideal=1.011494 beam_s=150.101
+SAVED completed=679 pending=96 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=679 variant=no_tiny tokens=[64, 63, 24, 23] cache=medium0
+OK case_id=679 analytical=1486848 beam=1486848 ideal=1469952 analytical_minus_beam=0 beam_over_ideal=1.011494 beam_s=157.015
+SAVED completed=680 pending=95 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=680 variant=tiny1 tokens=[64, 63, 24, 23, 1] cache=none
+OK case_id=680 analytical=1520640 beam=1520640 ideal=1478400 analytical_minus_beam=0 beam_over_ideal=1.028571 beam_s=310.333
+SAVED completed=681 pending=94 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=681 variant=tiny1 tokens=[64, 63, 24, 23, 1] cache=hot_pair
+OK case_id=681 analytical=1520640 beam=1520640 ideal=1478400 analytical_minus_beam=0 beam_over_ideal=1.028571 beam_s=297.944
+SAVED completed=682 pending=93 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=682 variant=tiny1 tokens=[64, 63, 24, 23, 1] cache=medium_pair
+OK case_id=682 analytical=1520640 beam=1520640 ideal=1478400 analytical_minus_beam=0 beam_over_ideal=1.028571 beam_s=312.037
+SAVED completed=683 pending=92 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=683 variant=tiny1 tokens=[64, 63, 24, 23, 1] cache=hot0
+OK case_id=683 analytical=1520640 beam=1520640 ideal=1478400 analytical_minus_beam=0 beam_over_ideal=1.028571 beam_s=321.042
+SAVED completed=684 pending=91 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=684 variant=tiny1 tokens=[64, 63, 24, 23, 1] cache=medium0
+OK case_id=684 analytical=1520640 beam=1520640 ideal=1478400 analytical_minus_beam=0 beam_over_ideal=1.028571 beam_s=312.963
+SAVED completed=685 pending=90 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=685 variant=tiny2 tokens=[64, 63, 24, 23, 2] cache=none
+OK case_id=685 analytical=1520640 beam=1520640 ideal=1486848 analytical_minus_beam=0 beam_over_ideal=1.022727 beam_s=323.142
+SAVED completed=686 pending=89 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=686 variant=tiny2 tokens=[64, 63, 24, 23, 2] cache=hot_pair
+OK case_id=686 analytical=1520640 beam=1520640 ideal=1486848 analytical_minus_beam=0 beam_over_ideal=1.022727 beam_s=313.200
+SAVED completed=687 pending=88 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=687 variant=tiny2 tokens=[64, 63, 24, 23, 2] cache=medium_pair
+OK case_id=687 analytical=1520640 beam=1520640 ideal=1486848 analytical_minus_beam=0 beam_over_ideal=1.022727 beam_s=324.189
+SAVED completed=688 pending=87 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=688 variant=tiny2 tokens=[64, 63, 24, 23, 2] cache=hot0
+OK case_id=688 analytical=1520640 beam=1520640 ideal=1486848 analytical_minus_beam=0 beam_over_ideal=1.022727 beam_s=326.235
+SAVED completed=689 pending=86 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=689 variant=tiny2 tokens=[64, 63, 24, 23, 2] cache=medium0
+OK case_id=689 analytical=1520640 beam=1520640 ideal=1486848 analytical_minus_beam=0 beam_over_ideal=1.022727 beam_s=319.906
+SAVED completed=690 pending=85 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=690 variant=two_tiny tokens=[64, 63, 24, 23, 1, 1] cache=none
+OK case_id=690 analytical=1520640 beam=1554432 ideal=1486848 analytical_minus_beam=-33792 beam_over_ideal=1.045455 beam_s=388.590
+SAVED completed=691 pending=84 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=691 variant=two_tiny tokens=[64, 63, 24, 23, 1, 1] cache=hot_pair
+OK case_id=691 analytical=1520640 beam=1554432 ideal=1486848 analytical_minus_beam=-33792 beam_over_ideal=1.045455 beam_s=388.421
+SAVED completed=692 pending=83 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=692 variant=two_tiny tokens=[64, 63, 24, 23, 1, 1] cache=medium_pair
+OK case_id=692 analytical=1520640 beam=1554432 ideal=1486848 analytical_minus_beam=-33792 beam_over_ideal=1.045455 beam_s=397.152
+SAVED completed=693 pending=82 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=693 variant=two_tiny tokens=[64, 63, 24, 23, 1, 1] cache=hot0
+OK case_id=693 analytical=1520640 beam=1554432 ideal=1486848 analytical_minus_beam=-33792 beam_over_ideal=1.045455 beam_s=390.062
+SAVED completed=694 pending=81 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=694 variant=two_tiny tokens=[64, 63, 24, 23, 1, 1] cache=medium0
+OK case_id=694 analytical=1520640 beam=1554432 ideal=1486848 analytical_minus_beam=-33792 beam_over_ideal=1.045455 beam_s=397.670
+SAVED completed=695 pending=80 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=695 variant=asym_tiny tokens=[64, 62, 24, 22, 1] cache=none
+OK case_id=695 analytical=1486848 beam=1486848 ideal=1461504 analytical_minus_beam=0 beam_over_ideal=1.017341 beam_s=290.419
+SAVED completed=696 pending=79 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=696 variant=asym_tiny tokens=[64, 62, 24, 22, 1] cache=hot_pair
+OK case_id=696 analytical=1486848 beam=1486848 ideal=1461504 analytical_minus_beam=0 beam_over_ideal=1.017341 beam_s=262.193
+SAVED completed=697 pending=78 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=697 variant=asym_tiny tokens=[64, 62, 24, 22, 1] cache=medium_pair
+OK case_id=697 analytical=1486848 beam=1486848 ideal=1461504 analytical_minus_beam=0 beam_over_ideal=1.017341 beam_s=284.565
+SAVED completed=698 pending=77 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=698 variant=asym_tiny tokens=[64, 62, 24, 22, 1] cache=hot0
+OK case_id=698 analytical=1486848 beam=1486848 ideal=1461504 analytical_minus_beam=0 beam_over_ideal=1.017341 beam_s=265.570
+SAVED completed=699 pending=76 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=699 variant=asym_tiny tokens=[64, 62, 24, 22, 1] cache=medium0
+OK case_id=699 analytical=1486848 beam=1486848 ideal=1461504 analytical_minus_beam=0 beam_over_ideal=1.017341 beam_s=256.513
+SAVED completed=700 pending=75 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=700 variant=no_tiny tokens=[64, 63, 31, 30] cache=none
+OK case_id=700 analytical=1622016 beam=1622016 ideal=1588224 analytical_minus_beam=0 beam_over_ideal=1.021277 beam_s=186.732
+SAVED completed=701 pending=74 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=701 variant=no_tiny tokens=[64, 63, 31, 30] cache=hot_pair
+OK case_id=701 analytical=1622016 beam=1622016 ideal=1588224 analytical_minus_beam=0 beam_over_ideal=1.021277 beam_s=178.869
+SAVED completed=702 pending=73 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=702 variant=no_tiny tokens=[64, 63, 31, 30] cache=medium_pair
+OK case_id=702 analytical=1622016 beam=1622016 ideal=1588224 analytical_minus_beam=0 beam_over_ideal=1.021277 beam_s=181.335
+SAVED completed=703 pending=72 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=703 variant=no_tiny tokens=[64, 63, 31, 30] cache=hot0
+OK case_id=703 analytical=1622016 beam=1622016 ideal=1588224 analytical_minus_beam=0 beam_over_ideal=1.021277 beam_s=179.575
+SAVED completed=704 pending=71 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=704 variant=no_tiny tokens=[64, 63, 31, 30] cache=medium0
+OK case_id=704 analytical=1622016 beam=1622016 ideal=1588224 analytical_minus_beam=0 beam_over_ideal=1.021277 beam_s=172.445
+SAVED completed=705 pending=70 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=705 variant=tiny1 tokens=[64, 63, 31, 30, 1] cache=none
+OK case_id=705 analytical=1622016 beam=1622016 ideal=1596672 analytical_minus_beam=0 beam_over_ideal=1.015873 beam_s=355.227
+SAVED completed=706 pending=69 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=706 variant=tiny1 tokens=[64, 63, 31, 30, 1] cache=hot_pair
+OK case_id=706 analytical=1622016 beam=1622016 ideal=1596672 analytical_minus_beam=0 beam_over_ideal=1.015873 beam_s=335.629
+SAVED completed=707 pending=68 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=707 variant=tiny1 tokens=[64, 63, 31, 30, 1] cache=medium_pair
+OK case_id=707 analytical=1622016 beam=1622016 ideal=1596672 analytical_minus_beam=0 beam_over_ideal=1.015873 beam_s=346.518
+SAVED completed=708 pending=67 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=708 variant=tiny1 tokens=[64, 63, 31, 30, 1] cache=hot0
+OK case_id=708 analytical=1622016 beam=1622016 ideal=1596672 analytical_minus_beam=0 beam_over_ideal=1.015873 beam_s=332.815
+SAVED completed=709 pending=66 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=709 variant=tiny1 tokens=[64, 63, 31, 30, 1] cache=medium0
+OK case_id=709 analytical=1622016 beam=1622016 ideal=1596672 analytical_minus_beam=0 beam_over_ideal=1.015873 beam_s=346.720
+SAVED completed=710 pending=65 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=710 variant=tiny2 tokens=[64, 63, 31, 30, 2] cache=none
+OK case_id=710 analytical=1622016 beam=1622016 ideal=1605120 analytical_minus_beam=0 beam_over_ideal=1.010526 beam_s=346.497
+SAVED completed=711 pending=64 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=711 variant=tiny2 tokens=[64, 63, 31, 30, 2] cache=hot_pair
+OK case_id=711 analytical=1622016 beam=1622016 ideal=1605120 analytical_minus_beam=0 beam_over_ideal=1.010526 beam_s=349.028
+SAVED completed=712 pending=63 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=712 variant=tiny2 tokens=[64, 63, 31, 30, 2] cache=medium_pair
+OK case_id=712 analytical=1622016 beam=1622016 ideal=1605120 analytical_minus_beam=0 beam_over_ideal=1.010526 beam_s=345.240
+SAVED completed=713 pending=62 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=713 variant=tiny2 tokens=[64, 63, 31, 30, 2] cache=hot0
+OK case_id=713 analytical=1622016 beam=1622016 ideal=1605120 analytical_minus_beam=0 beam_over_ideal=1.010526 beam_s=338.228
+SAVED completed=714 pending=61 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=714 variant=tiny2 tokens=[64, 63, 31, 30, 2] cache=medium0
+OK case_id=714 analytical=1622016 beam=1622016 ideal=1605120 analytical_minus_beam=0 beam_over_ideal=1.010526 beam_s=349.892
+SAVED completed=715 pending=60 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=715 variant=two_tiny tokens=[64, 63, 31, 30, 1, 1] cache=none
+OK case_id=715 analytical=1655808 beam=1689600 ideal=1605120 analytical_minus_beam=-33792 beam_over_ideal=1.052632 beam_s=382.033
+SAVED completed=716 pending=59 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=716 variant=two_tiny tokens=[64, 63, 31, 30, 1, 1] cache=hot_pair
+OK case_id=716 analytical=1655808 beam=1689600 ideal=1605120 analytical_minus_beam=-33792 beam_over_ideal=1.052632 beam_s=355.167
+SAVED completed=717 pending=58 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=717 variant=two_tiny tokens=[64, 63, 31, 30, 1, 1] cache=medium_pair
+OK case_id=717 analytical=1655808 beam=1689600 ideal=1605120 analytical_minus_beam=-33792 beam_over_ideal=1.052632 beam_s=366.123
+SAVED completed=718 pending=57 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=718 variant=two_tiny tokens=[64, 63, 31, 30, 1, 1] cache=hot0
+OK case_id=718 analytical=1655808 beam=1689600 ideal=1605120 analytical_minus_beam=-33792 beam_over_ideal=1.052632 beam_s=387.393
+SAVED completed=719 pending=56 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=719 variant=two_tiny tokens=[64, 63, 31, 30, 1, 1] cache=medium0
+OK case_id=719 analytical=1655808 beam=1689600 ideal=1605120 analytical_minus_beam=-33792 beam_over_ideal=1.052632 beam_s=347.417
+SAVED completed=720 pending=55 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=720 variant=asym_tiny tokens=[64, 62, 31, 29, 1] cache=none
+OK case_id=720 analytical=1622016 beam=1622016 ideal=1579776 analytical_minus_beam=0 beam_over_ideal=1.026738 beam_s=293.175
+SAVED completed=721 pending=54 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=721 variant=asym_tiny tokens=[64, 62, 31, 29, 1] cache=hot_pair
+OK case_id=721 analytical=1622016 beam=1622016 ideal=1579776 analytical_minus_beam=0 beam_over_ideal=1.026738 beam_s=264.987
+SAVED completed=722 pending=53 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=722 variant=asym_tiny tokens=[64, 62, 31, 29, 1] cache=medium_pair
+OK case_id=722 analytical=1622016 beam=1622016 ideal=1579776 analytical_minus_beam=0 beam_over_ideal=1.026738 beam_s=270.283
+SAVED completed=723 pending=52 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=723 variant=asym_tiny tokens=[64, 62, 31, 29, 1] cache=hot0
+OK case_id=723 analytical=1622016 beam=1622016 ideal=1579776 analytical_minus_beam=0 beam_over_ideal=1.026738 beam_s=265.166
+SAVED completed=724 pending=51 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=724 variant=asym_tiny tokens=[64, 62, 31, 29, 1] cache=medium0
+OK case_id=724 analytical=1622016 beam=1622016 ideal=1579776 analytical_minus_beam=0 beam_over_ideal=1.026738 beam_s=265.503
+SAVED completed=725 pending=50 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=725 variant=no_tiny tokens=[64, 63, 32, 31] cache=none
+OK case_id=725 analytical=1622016 beam=1622016 ideal=1605120 analytical_minus_beam=0 beam_over_ideal=1.010526 beam_s=169.160
+SAVED completed=726 pending=49 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=726 variant=no_tiny tokens=[64, 63, 32, 31] cache=hot_pair
+OK case_id=726 analytical=1622016 beam=1622016 ideal=1605120 analytical_minus_beam=0 beam_over_ideal=1.010526 beam_s=160.820
+SAVED completed=727 pending=48 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=727 variant=no_tiny tokens=[64, 63, 32, 31] cache=medium_pair
+OK case_id=727 analytical=1622016 beam=1622016 ideal=1605120 analytical_minus_beam=0 beam_over_ideal=1.010526 beam_s=162.173
+SAVED completed=728 pending=47 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=728 variant=no_tiny tokens=[64, 63, 32, 31] cache=hot0
+OK case_id=728 analytical=1622016 beam=1622016 ideal=1605120 analytical_minus_beam=0 beam_over_ideal=1.010526 beam_s=165.953
+SAVED completed=729 pending=46 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=729 variant=no_tiny tokens=[64, 63, 32, 31] cache=medium0
+OK case_id=729 analytical=1622016 beam=1622016 ideal=1605120 analytical_minus_beam=0 beam_over_ideal=1.010526 beam_s=163.360
+SAVED completed=730 pending=45 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=730 variant=tiny1 tokens=[64, 63, 32, 31, 1] cache=none
+OK case_id=730 analytical=1655808 beam=1655808 ideal=1613568 analytical_minus_beam=0 beam_over_ideal=1.026178 beam_s=302.991
+SAVED completed=731 pending=44 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=731 variant=tiny1 tokens=[64, 63, 32, 31, 1] cache=hot_pair
+OK case_id=731 analytical=1655808 beam=1655808 ideal=1613568 analytical_minus_beam=0 beam_over_ideal=1.026178 beam_s=287.471
+SAVED completed=732 pending=43 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=732 variant=tiny1 tokens=[64, 63, 32, 31, 1] cache=medium_pair
+OK case_id=732 analytical=1655808 beam=1655808 ideal=1613568 analytical_minus_beam=0 beam_over_ideal=1.026178 beam_s=298.977
+SAVED completed=733 pending=42 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=733 variant=tiny1 tokens=[64, 63, 32, 31, 1] cache=hot0
+OK case_id=733 analytical=1655808 beam=1655808 ideal=1613568 analytical_minus_beam=0 beam_over_ideal=1.026178 beam_s=302.662
+SAVED completed=734 pending=41 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=734 variant=tiny1 tokens=[64, 63, 32, 31, 1] cache=medium0
+OK case_id=734 analytical=1655808 beam=1655808 ideal=1613568 analytical_minus_beam=0 beam_over_ideal=1.026178 beam_s=302.332
+SAVED completed=735 pending=40 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=735 variant=tiny2 tokens=[64, 63, 32, 31, 2] cache=none
+OK case_id=735 analytical=1655808 beam=1655808 ideal=1622016 analytical_minus_beam=0 beam_over_ideal=1.020833 beam_s=308.528
+SAVED completed=736 pending=39 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=736 variant=tiny2 tokens=[64, 63, 32, 31, 2] cache=hot_pair
+OK case_id=736 analytical=1655808 beam=1655808 ideal=1622016 analytical_minus_beam=0 beam_over_ideal=1.020833 beam_s=286.177
+SAVED completed=737 pending=38 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=737 variant=tiny2 tokens=[64, 63, 32, 31, 2] cache=medium_pair
+OK case_id=737 analytical=1655808 beam=1655808 ideal=1622016 analytical_minus_beam=0 beam_over_ideal=1.020833 beam_s=294.116
+SAVED completed=738 pending=37 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=738 variant=tiny2 tokens=[64, 63, 32, 31, 2] cache=hot0
+OK case_id=738 analytical=1655808 beam=1655808 ideal=1622016 analytical_minus_beam=0 beam_over_ideal=1.020833 beam_s=311.818
+SAVED completed=739 pending=36 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=739 variant=tiny2 tokens=[64, 63, 32, 31, 2] cache=medium0
+OK case_id=739 analytical=1655808 beam=1655808 ideal=1622016 analytical_minus_beam=0 beam_over_ideal=1.020833 beam_s=301.723
+SAVED completed=740 pending=35 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=740 variant=two_tiny tokens=[64, 63, 32, 31, 1, 1] cache=none
+OK case_id=740 analytical=1655808 beam=1689600 ideal=1622016 analytical_minus_beam=-33792 beam_over_ideal=1.041667 beam_s=318.009
+SAVED completed=741 pending=34 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=741 variant=two_tiny tokens=[64, 63, 32, 31, 1, 1] cache=hot_pair
+OK case_id=741 analytical=1655808 beam=1689600 ideal=1622016 analytical_minus_beam=-33792 beam_over_ideal=1.041667 beam_s=323.767
+SAVED completed=742 pending=33 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=742 variant=two_tiny tokens=[64, 63, 32, 31, 1, 1] cache=medium_pair
+OK case_id=742 analytical=1655808 beam=1689600 ideal=1622016 analytical_minus_beam=-33792 beam_over_ideal=1.041667 beam_s=320.014
+SAVED completed=743 pending=32 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=743 variant=two_tiny tokens=[64, 63, 32, 31, 1, 1] cache=hot0
+OK case_id=743 analytical=1655808 beam=1689600 ideal=1622016 analytical_minus_beam=-33792 beam_over_ideal=1.041667 beam_s=325.866
+SAVED completed=744 pending=31 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=744 variant=two_tiny tokens=[64, 63, 32, 31, 1, 1] cache=medium0
+OK case_id=744 analytical=1655808 beam=1689600 ideal=1622016 analytical_minus_beam=-33792 beam_over_ideal=1.041667 beam_s=325.412
+SAVED completed=745 pending=30 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=745 variant=asym_tiny tokens=[64, 62, 32, 30, 1] cache=none
+OK case_id=745 analytical=1622016 beam=1622016 ideal=1596672 analytical_minus_beam=0 beam_over_ideal=1.015873 beam_s=266.174
+SAVED completed=746 pending=29 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=746 variant=asym_tiny tokens=[64, 62, 32, 30, 1] cache=hot_pair
+OK case_id=746 analytical=1622016 beam=1622016 ideal=1596672 analytical_minus_beam=0 beam_over_ideal=1.015873 beam_s=241.921
+SAVED completed=747 pending=28 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=747 variant=asym_tiny tokens=[64, 62, 32, 30, 1] cache=medium_pair
+OK case_id=747 analytical=1622016 beam=1622016 ideal=1596672 analytical_minus_beam=0 beam_over_ideal=1.015873 beam_s=241.013
+SAVED completed=748 pending=27 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=748 variant=asym_tiny tokens=[64, 62, 32, 30, 1] cache=hot0
+OK case_id=748 analytical=1622016 beam=1622016 ideal=1596672 analytical_minus_beam=0 beam_over_ideal=1.015873 beam_s=262.591
+SAVED completed=749 pending=26 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=749 variant=asym_tiny tokens=[64, 62, 32, 30, 1] cache=medium0
+OK case_id=749 analytical=1622016 beam=1622016 ideal=1596672 analytical_minus_beam=0 beam_over_ideal=1.015873 beam_s=257.983
+SAVED completed=750 pending=25 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=750 variant=no_tiny tokens=[64, 63, 33, 32] cache=none
+OK case_id=750 analytical=1655808 beam=1655808 ideal=1622016 analytical_minus_beam=0 beam_over_ideal=1.020833 beam_s=166.276
+SAVED completed=751 pending=24 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=751 variant=no_tiny tokens=[64, 63, 33, 32] cache=hot_pair
+OK case_id=751 analytical=1655808 beam=1655808 ideal=1622016 analytical_minus_beam=0 beam_over_ideal=1.020833 beam_s=150.639
+SAVED completed=752 pending=23 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=752 variant=no_tiny tokens=[64, 63, 33, 32] cache=medium_pair
+OK case_id=752 analytical=1655808 beam=1655808 ideal=1622016 analytical_minus_beam=0 beam_over_ideal=1.020833 beam_s=161.110
+SAVED completed=753 pending=22 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=753 variant=no_tiny tokens=[64, 63, 33, 32] cache=hot0
+OK case_id=753 analytical=1655808 beam=1655808 ideal=1622016 analytical_minus_beam=0 beam_over_ideal=1.020833 beam_s=166.215
+SAVED completed=754 pending=21 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=754 variant=no_tiny tokens=[64, 63, 33, 32] cache=medium0
+OK case_id=754 analytical=1655808 beam=1655808 ideal=1622016 analytical_minus_beam=0 beam_over_ideal=1.020833 beam_s=161.338
+SAVED completed=755 pending=20 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=755 variant=tiny1 tokens=[64, 63, 33, 32, 1] cache=none
+OK case_id=755 analytical=1689600 beam=1655808 ideal=1630464 analytical_minus_beam=33792 beam_over_ideal=1.015544 beam_s=326.883
+SAVED completed=756 pending=19 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=756 variant=tiny1 tokens=[64, 63, 33, 32, 1] cache=hot_pair
+OK case_id=756 analytical=1655808 beam=1655808 ideal=1630464 analytical_minus_beam=0 beam_over_ideal=1.015544 beam_s=299.346
+SAVED completed=757 pending=18 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=757 variant=tiny1 tokens=[64, 63, 33, 32, 1] cache=medium_pair
+OK case_id=757 analytical=1655808 beam=1655808 ideal=1630464 analytical_minus_beam=0 beam_over_ideal=1.015544 beam_s=293.316
+SAVED completed=758 pending=17 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=758 variant=tiny1 tokens=[64, 63, 33, 32, 1] cache=hot0
+OK case_id=758 analytical=1655808 beam=1655808 ideal=1630464 analytical_minus_beam=0 beam_over_ideal=1.015544 beam_s=300.745
+SAVED completed=759 pending=16 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=759 variant=tiny1 tokens=[64, 63, 33, 32, 1] cache=medium0
+OK case_id=759 analytical=1655808 beam=1655808 ideal=1630464 analytical_minus_beam=0 beam_over_ideal=1.015544 beam_s=315.380
+SAVED completed=760 pending=15 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=760 variant=tiny2 tokens=[64, 63, 33, 32, 2] cache=none
+OK case_id=760 analytical=1689600 beam=1655808 ideal=1638912 analytical_minus_beam=33792 beam_over_ideal=1.010309 beam_s=311.240
+SAVED completed=761 pending=14 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=761 variant=tiny2 tokens=[64, 63, 33, 32, 2] cache=hot_pair
+OK case_id=761 analytical=1655808 beam=1655808 ideal=1638912 analytical_minus_beam=0 beam_over_ideal=1.010309 beam_s=300.054
+SAVED completed=762 pending=13 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=762 variant=tiny2 tokens=[64, 63, 33, 32, 2] cache=medium_pair
+OK case_id=762 analytical=1655808 beam=1655808 ideal=1638912 analytical_minus_beam=0 beam_over_ideal=1.010309 beam_s=317.351
+SAVED completed=763 pending=12 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=763 variant=tiny2 tokens=[64, 63, 33, 32, 2] cache=hot0
+OK case_id=763 analytical=1655808 beam=1655808 ideal=1638912 analytical_minus_beam=0 beam_over_ideal=1.010309 beam_s=308.250
+SAVED completed=764 pending=11 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=764 variant=tiny2 tokens=[64, 63, 33, 32, 2] cache=medium0
+OK case_id=764 analytical=1655808 beam=1655808 ideal=1638912 analytical_minus_beam=0 beam_over_ideal=1.010309 beam_s=309.834
+SAVED completed=765 pending=10 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=765 variant=two_tiny tokens=[64, 63, 33, 32, 1, 1] cache=none
+OK case_id=765 analytical=1723392 beam=1723392 ideal=1638912 analytical_minus_beam=0 beam_over_ideal=1.051546 beam_s=330.197
+SAVED completed=766 pending=9 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=766 variant=two_tiny tokens=[64, 63, 33, 32, 1, 1] cache=hot_pair
+OK case_id=766 analytical=1689600 beam=1723392 ideal=1638912 analytical_minus_beam=-33792 beam_over_ideal=1.051546 beam_s=326.066
+SAVED completed=767 pending=8 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=767 variant=two_tiny tokens=[64, 63, 33, 32, 1, 1] cache=medium_pair
+OK case_id=767 analytical=1689600 beam=1723392 ideal=1638912 analytical_minus_beam=-33792 beam_over_ideal=1.051546 beam_s=318.487
+SAVED completed=768 pending=7 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=768 variant=two_tiny tokens=[64, 63, 33, 32, 1, 1] cache=hot0
+OK case_id=768 analytical=1689600 beam=1723392 ideal=1638912 analytical_minus_beam=-33792 beam_over_ideal=1.051546 beam_s=325.024
+SAVED completed=769 pending=6 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=769 variant=two_tiny tokens=[64, 63, 33, 32, 1, 1] cache=medium0
+OK case_id=769 analytical=1689600 beam=1723392 ideal=1638912 analytical_minus_beam=-33792 beam_over_ideal=1.051546 beam_s=329.407
+SAVED completed=770 pending=5 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=770 variant=asym_tiny tokens=[64, 62, 33, 31, 1] cache=none
+OK case_id=770 analytical=1689600 beam=1655808 ideal=1613568 analytical_minus_beam=33792 beam_over_ideal=1.026178 beam_s=288.354
+SAVED completed=771 pending=4 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=771 variant=asym_tiny tokens=[64, 62, 33, 31, 1] cache=hot_pair
+OK case_id=771 analytical=1655808 beam=1655808 ideal=1613568 analytical_minus_beam=0 beam_over_ideal=1.026178 beam_s=253.217
+SAVED completed=772 pending=3 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=772 variant=asym_tiny tokens=[64, 62, 33, 31, 1] cache=medium_pair
+OK case_id=772 analytical=1655808 beam=1655808 ideal=1613568 analytical_minus_beam=0 beam_over_ideal=1.026178 beam_s=276.623
+SAVED completed=773 pending=2 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=773 variant=asym_tiny tokens=[64, 62, 33, 31, 1] cache=hot0
+OK case_id=773 analytical=1655808 beam=1655808 ideal=1613568 analytical_minus_beam=0 beam_over_ideal=1.026178 beam_s=270.300
+SAVED completed=774 pending=1 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+RUN case_id=774 variant=asym_tiny tokens=[64, 62, 33, 31, 1] cache=medium0
+OK case_id=774 analytical=1655808 beam=1655808 ideal=1613568 analytical_minus_beam=0 beam_over_ideal=1.026178 beam_s=276.794
+SAVED completed=775 pending=0 out=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json
+SUMMARY completed=775 errors=0 pending=0 beam_better=22 beam_equal=528 beam_worse=225
+ALL_DONE results=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_results.json summary=/esat/studscratch/r1015673/Thesis/Idea_Model/strategy_discovery_summary.json

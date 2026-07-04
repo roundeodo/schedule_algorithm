@@ -1,0 +1,27 @@
+{
+  "total": 3000,
+  "changed": 2,
+  "runtime_s": 12.562901060009608,
+  "changed_cases": [
+    {
+      "file": "scheduler_eval_inputs_E8_stratified_v6.json",
+      "case_id": 9499,
+      "profile": "bimodal",
+      "active_n": 8,
+      "m_total": 97,
+      "n1_full": 1667072,
+      "n1_pruned": 1723392,
+      "ratio": 1.0337837837837838
+    },
+    {
+      "file": "scheduler_eval_inputs_E64_stratified_v6.json",
+      "case_id": 7227,
+      "profile": "single_hot",
+      "active_n": 15,
+      "m_total": 129,
+      "n1_full": 2466816,
+      "n1_pruned": 2511872,
+      "ratio": 1.0182648401826484
+    }
+  ]
+}

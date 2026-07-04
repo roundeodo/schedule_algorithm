@@ -1,0 +1,11 @@
+sample_idx,dist_type,n_experts,ntoks,cache_c2_eid,cache_c3_eid,anal_ms,status,error
+0,hot,1,8,-1,-1,67584,ok,
+1,hot,2,5 3,-1,-1,101376,ok,
+2,hot,1,16,0,-1,135168,ok,
+3,bimodal,5,24 22 6 6 6,-1,-1,574464,ok,
+4,zipf,6,19 10 7 5 4 3,-1,-1,473088,ok,
+5,uniform,7,2 1 1 1 1 1 1,-1,-1,236544,ok,
+6,hot,1,24,0,-1,202752,ok,
+7,hot,6,19 1 1 1 1 1,-1,-1,315392,ok,
+8,single,1,16,-1,-1,135168,ok,
+9,zipf,5,34 8 3 2 1,-1,-1,473088,ok,

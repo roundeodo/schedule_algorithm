@@ -1,0 +1,220 @@
+{
+  "policy": "balanced",
+  "top_policy": "pruned",
+  "n1_policy": "full",
+  "sample_per_file": 100,
+  "runtime_s": 5.209228986001108,
+  "summary": {
+    "n": 300,
+    "mean": 1.0008982947067364,
+    "median": 1.0,
+    "max": 1.3333333333333333,
+    "min": 0.6554621848739496,
+    "exact": 226,
+    "le_1pct": 273,
+    "le_5pct": 291,
+    "lt_full": 15
+  },
+  "worst_cases": [
+    {
+      "file": "scheduler_eval_inputs_E8_stratified_v6.json",
+      "case_id": 8989,
+      "active_n": 4,
+      "m_total": 4,
+      "profile": "balanced_noise",
+      "full_c_cc": 101376,
+      "hw_cc": 135168,
+      "ratio": 1.3333333333333333
+    },
+    {
+      "file": "scheduler_eval_inputs_E8_stratified_v6.json",
+      "case_id": 6767,
+      "active_n": 4,
+      "m_total": 15,
+      "profile": "bimodal",
+      "full_c_cc": 270336,
+      "hw_cc": 315392,
+      "ratio": 1.1666666666666667
+    },
+    {
+      "file": "scheduler_eval_inputs_E32_stratified_v6.json",
+      "case_id": 8989,
+      "active_n": 10,
+      "m_total": 9,
+      "profile": "all_tiny",
+      "full_c_cc": 304128,
+      "hw_cc": 349184,
+      "ratio": 1.1481481481481481
+    },
+    {
+      "file": "scheduler_eval_inputs_E64_stratified_v6.json",
+      "case_id": 8282,
+      "active_n": 9,
+      "m_total": 5,
+      "profile": "single_hot",
+      "full_c_cc": 270336,
+      "hw_cc": 304128,
+      "ratio": 1.125
+    },
+    {
+      "file": "scheduler_eval_inputs_E32_stratified_v6.json",
+      "case_id": 1111,
+      "active_n": 15,
+      "m_total": 48,
+      "profile": "pair_split_trap",
+      "full_c_cc": 1081344,
+      "hw_cc": 1182720,
+      "ratio": 1.09375
+    },
+    {
+      "file": "scheduler_eval_inputs_E8_stratified_v6.json",
+      "case_id": 3737,
+      "active_n": 4,
+      "m_total": 5,
+      "profile": "zipf",
+      "full_c_cc": 135168,
+      "hw_cc": 146432,
+      "ratio": 1.0833333333333333
+    },
+    {
+      "file": "scheduler_eval_inputs_E32_stratified_v6.json",
+      "case_id": 5252,
+      "active_n": 19,
+      "m_total": 47,
+      "profile": "all_tiny",
+      "full_c_cc": 1115136,
+      "hw_cc": 1182720,
+      "ratio": 1.0606060606060606
+    },
+    {
+      "file": "scheduler_eval_inputs_E8_stratified_v6.json",
+      "case_id": 6464,
+      "active_n": 6,
+      "m_total": 7,
+      "profile": "pair_split_trap",
+      "full_c_cc": 202752,
+      "hw_cc": 214016,
+      "ratio": 1.0555555555555556
+    },
+    {
+      "file": "scheduler_eval_inputs_E32_stratified_v6.json",
+      "case_id": 9696,
+      "active_n": 11,
+      "m_total": 63,
+      "profile": "all_tiny",
+      "full_c_cc": 1250304,
+      "hw_cc": 1317888,
+      "ratio": 1.054054054054054
+    },
+    {
+      "file": "scheduler_eval_inputs_E8_stratified_v6.json",
+      "case_id": 7171,
+      "active_n": 8,
+      "m_total": 8,
+      "profile": "bimodal",
+      "full_c_cc": 270336,
+      "hw_cc": 281600,
+      "ratio": 1.0416666666666667
+    },
+    {
+      "file": "scheduler_eval_inputs_E32_stratified_v6.json",
+      "case_id": 7373,
+      "active_n": 15,
+      "m_total": 17,
+      "profile": "single_hot",
+      "full_c_cc": 585728,
+      "hw_cc": 608256,
+      "ratio": 1.0384615384615385
+    },
+    {
+      "file": "scheduler_eval_inputs_E64_stratified_v6.json",
+      "case_id": 9494,
+      "active_n": 33,
+      "m_total": 32,
+      "profile": "pair_split_trap",
+      "full_c_cc": 1216512,
+      "hw_cc": 1261568,
+      "ratio": 1.037037037037037
+    },
+    {
+      "file": "scheduler_eval_inputs_E8_stratified_v6.json",
+      "case_id": 5050,
+      "active_n": 7,
+      "m_total": 15,
+      "profile": "two_hot",
+      "full_c_cc": 337920,
+      "hw_cc": 349184,
+      "ratio": 1.0333333333333334
+    },
+    {
+      "file": "scheduler_eval_inputs_E32_stratified_v6.json",
+      "case_id": 5050,
+      "active_n": 5,
+      "m_total": 191,
+      "profile": "pair_split_trap",
+      "full_c_cc": 3244032,
+      "hw_cc": 3345408,
+      "ratio": 1.03125
+    },
+    {
+      "file": "scheduler_eval_inputs_E8_stratified_v6.json",
+      "case_id": 2020,
+      "active_n": 5,
+      "m_total": 191,
+      "profile": "pair_split_trap",
+      "full_c_cc": 3277824,
+      "hw_cc": 3379200,
+      "ratio": 1.0309278350515463
+    },
+    {
+      "file": "scheduler_eval_inputs_E32_stratified_v6.json",
+      "case_id": 4141,
+      "active_n": 17,
+      "m_total": 193,
+      "profile": "pair_split_trap",
+      "full_c_cc": 3852288,
+      "hw_cc": 3953664,
+      "ratio": 1.0263157894736843
+    },
+    {
+      "file": "scheduler_eval_inputs_E32_stratified_v6.json",
+      "case_id": 8585,
+      "active_n": 22,
+      "m_total": 95,
+      "profile": "two_hot",
+      "full_c_cc": 1824768,
+      "hw_cc": 1869824,
+      "ratio": 1.0246913580246915
+    },
+    {
+      "file": "scheduler_eval_inputs_E64_stratified_v6.json",
+      "case_id": 8787,
+      "active_n": 26,
+      "m_total": 96,
+      "profile": "shape_boundary",
+      "full_c_cc": 1757184,
+      "hw_cc": 1790976,
+      "ratio": 1.0192307692307692
+    },
+    {
+      "file": "scheduler_eval_inputs_E32_stratified_v6.json",
+      "case_id": 9797,
+      "active_n": 17,
+      "m_total": 65,
+      "profile": "balanced_noise",
+      "full_c_cc": 1250304,
+      "hw_cc": 1272832,
+      "ratio": 1.018018018018018
+    },
+    {
+      "file": "scheduler_eval_inputs_E32_stratified_v6.json",
+      "case_id": 3232,
+      "active_n": 16,
+      "m_total": 65,
+      "profile": "shape_boundary",
+      "full_c_cc": 1306624,
+      "hw_cc": 1329152,
+      "ratio": 1.0172413793103448
+    }
+  ]
+}
