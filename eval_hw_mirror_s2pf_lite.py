@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Hardware-oriented mirror of the MoE software scheduler.
-
-This model intentionally keeps the high-level expert scheduler aligned with the
-current C software scheduler, but replaces the expensive 25-way S2 down-prefetch
-placement search with a small set of hardware-friendly templates.
-
-It is meant for evaluating a future RTL scheduler policy against the full C
-software mirror in ``eval_c_mirror_v2.py``.
-"""
+"""Exact Python mirror of the pruned C/RTL hardware scheduler policy."""
 
 from __future__ import annotations
 
@@ -26,9 +18,9 @@ import eval_c_mirror_v2 as cm
 
 
 DEFAULT_INPUTS = (
-    ROOT / "scheduler_eval_inputs_E8_stratified_v6.json",
-    ROOT / "scheduler_eval_inputs_E32_stratified_v6.json",
-    ROOT / "scheduler_eval_inputs_E64_stratified_v6.json",
+    ROOT / "scheduler_strategy_coverage_E8.json",
+    ROOT / "scheduler_strategy_coverage_E32.json",
+    ROOT / "scheduler_strategy_coverage_E64.json",
 )
 
 
@@ -37,23 +29,16 @@ POLICY_TEMPLATES = {
     #   - pair/split only try no-pf and symmetric both-side S2PF.
     #   - no one-side pair/split S2PF.
     "minimal": {
-        "pair": ("none", "both_task_start", "both_dma1_end"),
-        "split": ("none", "both_dma1_end", "both_task_start"),
+        "pair": ("both_dma1_end", "none"),
+        "split": ("both_dma1_end", "none"),
     },
     # More faithful but still hardware-bounded version:
     #   - pair: none + symmetric both-side placements.
     #   - split: additionally keeps B-only, because full-run statistics showed
     #     split_top0 uses B-only often enough to be worth evaluating.
     "balanced": {
-        "pair": ("none", "both_task_start", "both_dma1_end", "both_latest"),
-        "split": (
-            "none",
-            "both_dma1_end",
-            "both_task_start",
-            "both_latest",
-            "b_only_dma1_end",
-            "b_only_latest",
-        ),
+        "pair": ("both_dma1_end", "none"),
+        "split": ("both_dma1_end", "b_only_dma1_end", "none"),
     },
 }
 
@@ -107,26 +92,14 @@ def _n1_split_cuts(ntok: int, *, n1_policy: str) -> list[int]:
 
 
 def _start_for(kind: str, sn: cm.CSnap, s3: int) -> int:
-    if kind == "task_start":
-        return sn.task_start
     if kind == "dma1_end":
         return sn.dma1_end
-    if kind == "latest":
-        return sn.s2_end - cm.C_TD3[s3]
     raise ValueError(f"unknown S2PF start kind: {kind}")
 
 
 def _apply_required_s2pf(sn: cm.CSnap, s3: int, kind: str) -> cm.CSnap | None:
     cand = cm._cc_apply_s2pf(sn, s3, _start_for(kind, sn, s3))
     return cand if cand.s2pf_start >= 0 else None
-
-
-def _pf_score(a: cm.CSnap, b: cm.CSnap) -> tuple[int, int]:
-    count = int(a.s2pf_start >= 0) + int(b.s2pf_start >= 0)
-    start_sum = (a.s2pf_start if a.s2pf_start >= 0 else 0) + (
-        b.s2pf_start if b.s2pf_start >= 0 else 0
-    )
-    return count, start_sum
 
 
 def _consider_s2pf_template(
@@ -180,30 +153,11 @@ def _hw_try_s2pf_pair(
     family_key = "split" if family in {"split_top0", "n1_split"} else "pair"
     templates = POLICY_TEMPLATES[policy][family_key]
 
-    best: tuple[cm.CSnap, cm.CSnap] | None = None
-    best_count = -1
-    best_start_sum = 1 << 62
-    seen = set()
     for template in templates:
         cand = _consider_s2pf_template(template, sa, s3a, sb, s3b)
-        if cand is None:
-            continue
-        key = (
-            cand[0].s2pf_start,
-            cand[0].s2pf_end,
-            cand[1].s2pf_start,
-            cand[1].s2pf_end,
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        count, start_sum = _pf_score(*cand)
-        if count > best_count or (count == best_count and start_sum < best_start_sum):
-            best = cand
-            best_count = count
-            best_start_sum = start_sum
-
-    return best if best is not None else (sa, sb)
+        if cand is not None:
+            return cand
+    return sa, sb
 
 
 def _hw_sim1(c2: cm.CSnap, c3: cm.CSnap, eid: int, ntok: int, *, policy: str) -> int:
@@ -248,6 +202,13 @@ def _hw_continuation_cost(c2: cm.CSnap, c3: cm.CSnap, rem: tuple, *, policy: str
         pa = tl + max(cm._cc_best_conc(rem[0][1]), cm._cc_best_conc(rem[1][1]))
         return min(max(tl, ss), pa)
     return cm._cc_greedy_h(c2.task_end, c3.task_end, rem)
+
+
+def _hw_cand_better(best, cost: int, snap_max: int, rem_len: int) -> bool:
+    """Mirror the RTL key: cost, remaining count, then max task end."""
+    if best is None:
+        return True
+    return (cost, rem_len, snap_max) < best
 
 
 def hw_mirror_schedule(
@@ -376,9 +337,8 @@ def hw_mirror_schedule(
                     return
                 cost = _hw_continuation_cost(ta, tb, rem_after, policy=policy)
                 smx = max(ta.task_end, tb.task_end)
-                smn = min(ta.task_end, tb.task_end)
-                if cm._cc_cand_better(best_key, cost, smx, smn, len(rem_after)):
-                    best_key = (cost, smx, smn, len(rem_after))
+                if _hw_cand_better(best_key, cost, smx, len(rem_after)):
+                    best_key = (cost, len(rem_after), smx)
                     best_snap = (ta, tb)
                     best_rem = rem_after
 
@@ -468,9 +428,8 @@ def hw_mirror_schedule(
             cc = cm._cc_swiglu_hit(top0_eid, idle_sn, tst)
             cf = cm._cc_down_hit(top0_eid, idle_sn, tst)
             sn = cm._cc_mk_snap(tst, cm.C_SHAPE_C, cm.C_SHAPE_C, top0_ntok, top0_eid, cc, cf)
-            if sn.bw_s3 > 0 and cm.C_TD3[cm.C_SHAPE_C] <= sn.s2_end - sn.task_start:
-                hi = sn.s2_end - cm.C_TD3[cm.C_SHAPE_C]
-                cand = cm._cc_apply_s2pf(sn, cm.C_SHAPE_C, hi)
+            if sn.bw_s3 > 0 and cm.C_TD3[cm.C_SHAPE_C] <= sn.s2_end - sn.dma1_end:
+                cand = cm._cc_apply_s2pf(sn, cm.C_SHAPE_C, sn.dma1_end)
                 if cand.s2pf_start >= 0:
                     ok2 = cm._cc_bw_ok(cand, busy_sn) if idle_ci == 0 else cm._cc_bw_ok(busy_sn, cand)
                     if ok2:
@@ -562,7 +521,7 @@ def main() -> int:
                     "case_id": case["case_id"],
                     "active_n": case["active_n"],
                     "m_total": case["m_total"],
-                    "profile": case["profile"],
+                    "construction": case["construction"],
                     "full_c_cc": full,
                     "hw_cc": hw,
                     "ratio": hw / full if full else None,

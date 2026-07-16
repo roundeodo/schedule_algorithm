@@ -2,7 +2,7 @@
 """
 eval_c_mirror_v2.py
 ===================
-精确镜像**当前** moe_scheduler.c 调度逻辑的 Python 评估脚本。
+保留裁剪前较完整候选空间的 C-style Python baseline。
 
 相比 eval_c_mirror.py（旧版 C 镜像），新增/修改：
   1. Ghost pf 注入 + 回滚（每次迭代开头，不只在 n=1）
@@ -15,7 +15,7 @@ eval_c_mirror_v2.py
 对比对象：
   - analytical_schedule (10K 缓存，baseline)
   - fast_schedule       (fast_scheduler.py，上轮测试最好者)
-  - c_mirror_v2         (本文件，当前 C 的精确镜像)
+  - c_mirror_v2         (本文件，full C-style baseline；不是当前 pruned C 的精确镜像)
 """
 
 import sys, os, json, time, math
@@ -612,7 +612,7 @@ def c_mirror_v2_schedule(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# C-accurate mirror for the current workload moe_scheduler.c.
+# Full C-style baseline used to evaluate pruned mirrors.
 #
 # The legacy implementation above was built on FourStageSnap helpers.  The C
 # scheduler now has BW-aware S4 prefetch state, so the executable mirror below
@@ -748,7 +748,7 @@ def _cc_apply_s2pf(sn: CSnap, s3: int, ps: int) -> CSnap:
     pe = ps + C_TD3[s3]
     if sn.bw_s3 == 0:
         return sn
-    if ps < sn.task_start or pe > sn.s2_end:
+    if ps < sn.dma1_end or pe > sn.s2_end:
         return sn
     out = replace(sn)
     out.s2pf_start = ps
@@ -764,32 +764,10 @@ def _cc_apply_s2pf(sn: CSnap, s3: int, ps: int) -> CSnap:
 
 def _cc_snap_segs(s: CSnap):
     out = []
-    has1 = s.cur_eid >= 0 and s.bw_s1 > 0 and s.dma1_end > s.task_start
-    s1lo, s1hi, s1bw = s.task_start, s.dma1_end, s.bw_s1
-    has4 = s.s2pf_start >= 0 and s.s2pf_bw > 0 and s.s2pf_end > s.s2pf_start
-    p4lo, p4hi, p4bw = s.s2pf_start, s.s2pf_end, s.s2pf_bw
-
-    if has1 and has4 and s1lo < p4hi and p4lo < s1hi:
-        ovl_lo = max(s1lo, p4lo)
-        ovl_hi = min(s1hi, p4hi)
-        merged = s1bw + p4bw
-        if merged > C_MAX_BW:
-            return None
-        if s1lo < p4lo:
-            out.append((s1lo, p4lo, s1bw))
-        elif p4lo < s1lo:
-            out.append((p4lo, s1lo, p4bw))
-        if ovl_hi > ovl_lo:
-            out.append((ovl_lo, ovl_hi, merged))
-        if s1hi > p4hi:
-            out.append((p4hi, s1hi, s1bw))
-        elif p4hi > s1hi:
-            out.append((s1hi, p4hi, p4bw))
-    else:
-        if has1:
-            out.append((s1lo, s1hi, s1bw))
-        if has4:
-            out.append((p4lo, p4hi, p4bw))
+    if s.cur_eid >= 0 and s.bw_s1 > 0:
+        out.append((s.task_start, s.dma1_end, s.bw_s1))
+    if s.s2pf_start >= 0 and s.s2pf_bw > 0:
+        out.append((s.s2pf_start, s.s2pf_end, s.s2pf_bw))
 
     if s.cur_eid >= 0 and s.bw_s3 > 0 and s.dma3_end > s.s2_end:
         out.append((s.s2_end, s.dma3_end, s.bw_s3))
@@ -801,8 +779,6 @@ def _cc_snap_segs(s: CSnap):
 def _cc_bw_ok(a: CSnap, b: CSnap) -> bool:
     sa = _cc_snap_segs(a)
     sb = _cc_snap_segs(b)
-    if sa is None or sb is None:
-        return False
     for alo, ahi, abw in sa:
         for blo, bhi, bbw in sb:
             lo = max(alo, blo)
@@ -816,8 +792,7 @@ def _cc_s4pf_local_ok(s: CSnap) -> bool:
     return (
         s.cur_eid >= 0
         and s.pf_eid == -1
-        and s.dma1_end <= s.s4_start
-        and s.s4_start + C_TD1[C_SHAPE_A] <= s.task_end
+        and s.dma3_end + C_TD1[C_SHAPE_A] <= s.task_end
     )
 
 
@@ -829,7 +804,7 @@ def _cc_apply_s4pf_ghost(s: CSnap) -> CSnap:
     out.pf_end = out.task_end
     out.pf_full = 0
     out.s4pf_valid = 1
-    out.s4pf_start = out.s4_start
+    out.s4pf_start = out.dma3_end
     return out
 
 
@@ -877,14 +852,12 @@ def _cc_pick_shapes(na: int, nb: int, sw_a: bool, dn_a: bool, sw_b: bool, dn_b: 
 
 def _cc_s2pf_candidates(s: CSnap, s3: int):
     cand = []
-    span = s.s2_end - s.task_start
+    span = s.s2_end - s.dma1_end
     if s.bw_s3 > 0 and C_TD3[s3] <= span:
-        lo = s.task_start
+        lo = s.dma1_end
         hi = s.s2_end - C_TD3[s3]
         if hi >= lo:
             cand.append(lo)
-            if lo <= s.dma1_end <= hi and s.dma1_end != lo:
-                cand.append(s.dma1_end)
             if lo <= s.s1_end <= hi and s.s1_end != s.dma1_end:
                 cand.append(s.s1_end)
             if hi != lo:
@@ -1263,7 +1236,7 @@ def c_mirror_v2_schedule(
             cc = _cc_swiglu_hit(top0_eid, idle_sn, tst)
             cf = _cc_down_hit(top0_eid, idle_sn, tst)
             sn = _cc_mk_snap(tst, C_SHAPE_C, C_SHAPE_C, top0_ntok, top0_eid, cc, cf)
-            if sn.bw_s3 > 0 and C_TD3[C_SHAPE_C] <= sn.s2_end - sn.task_start:
+            if sn.bw_s3 > 0 and C_TD3[C_SHAPE_C] <= sn.s2_end - sn.dma1_end:
                 hi = sn.s2_end - C_TD3[C_SHAPE_C]
                 cand = _cc_apply_s2pf(sn, C_SHAPE_C, hi)
                 if cand.s2pf_start >= 0:

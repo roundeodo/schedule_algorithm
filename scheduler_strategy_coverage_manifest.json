@@ -1,0 +1,12 @@
+{
+  "name": "scheduler_strategy_coverage",
+  "seed": 20260711,
+  "topk": 2,
+  "n_cases_per_e": 10000,
+  "purpose": "Feature-stratified strategy discovery and validation. This suite is coverage-balanced and must not be interpreted as a measured router probability distribution.",
+  "files": [
+    "scheduler_strategy_coverage_E8.json",
+    "scheduler_strategy_coverage_E32.json",
+    "scheduler_strategy_coverage_E64.json"
+  ]
+}
