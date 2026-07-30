@@ -1,13 +1,15 @@
-# Frozen RTL scheduler policy contract
+# Archived P5 RTL scheduler policy contract
 
-Policy ID: `r4-b2-k32-direct-v8-lpt-rem-snap-v1`
+Policy ID: `r8-k32-direct-v9-full-lpt-dma-pm-rem-snap-p5`
 
-Status: frozen R4+bottom2/LPT v1 baseline contract.  It remains bit-exact for
-reproducing the completed evaluation, but active P5 work in
-`SCHEDULER_POLICY_SPEC.md` is evaluating an R8/K32 ordered-window ranker.  Do
-not begin a new RTL implementation from this v1 contract until P5 either
-passes its gates and publishes a replacement contract or is explicitly
-rejected in favor of this baseline.
+Status: retained for reproduction and cost analysis only.  Full-LPT,
+DMA-only pathmax and direct-v9 numeric ordering completed their historical
+4,739-case validation, but the E64 local descriptor store and full-list scan
+are not deployable under the confirmed slave-only, at-most-6+6-entry runtime
+boundary.  Do not implement this file as the current RTL target.  The bounded
+R4+bottom2/S2 policy in `SCHEDULER_POLICY_SPEC.md` passed closed-loop and
+blind-v2 gates on 2026-07-19.  Its replacement RTL contract and
+golden-equivalence harness are the next implementation deliverables.
 
 ## Runtime boundary
 
@@ -17,33 +19,54 @@ generates and scores at most 32 candidates, and returns one action. The state
 transition is committed before the scheduler is invoked again. It does not
 unroll the complete batch or future rounds.
 
-Required state:
+Required persistent state:
 
-- remaining `(eid, ntok)` entries sorted by descending token count and then
-  ascending expert ID;
-- remaining-entry valid mask and count;
+- up to 64 immutable `(eid, ntok)` descriptors sorted by descending token
+  count and then ascending expert ID, written once by CVA6 at batch setup;
+- one RTL-owned valid bit per descriptor and the remaining-entry count;
 - C2 and C3 four-stage absolute timing boundaries;
 - current/resident/prefetched expert IDs and full/S1-only residency flags;
 - S1, S3, S2PF and S4PF DMA lane bindings and interval endpoints;
 - the inherited admissible `f_score` pathmax bound.
 
-All scheduler timing arithmetic is performed in `Tq = 11,264` cycle units.
-The four-stage constants and every legal endpoint in the frozen model are
-integer multiples of `Tq`. Conversion back to cycles occurs only at the
-software-visible boundary.
+RTL clears descriptor valid bits when actions commit.  It extracts the first
+eight valid descriptors for candidate generation and scans all valid
+descriptors for the future score.  CVA6 performs no per-round window refill,
+bottom selection or shadow-window update.
+
+Each descriptor keeps its immutable physical index `0..63`, equal to its
+batch-initial sorted position.  Removing experts changes only the valid mask;
+it never compacts or rewrites descriptors.  The first eight set bits are the
+current R0..R7.  Candidate, cache and prefetch state carries the physical index
+alongside the expert ID, so commit clears one or two exact bits without an EID
+content-addressable search.  A sequential 64-bit valid-mask scan is sufficient
+for top8 extraction and full-LPT traversal.
+
+Exact four-stage task and DMA endpoints remain in the existing
+`Tq = 11,264` cycle domain because every physical stage duration is an integer
+multiple of `Tq`.  Candidate scoring uses a one-bit-wider
+`Hq = 5,632` cycle domain: timeline endpoints are left-shifted by one on entry
+to the scorer.  This represents the half-quantum result of sharing residual
+DMA work across two lanes without widening the complete timeline datapath.
+Conversion back to cycles occurs only at the software-visible boundary.
 
 The design dataset contains at most 64 experts, 256 tokens per expert and 512
 total tokens. These are minimum supported limits, not permission to silently
 saturate larger runtime inputs; configuration registers must reject unsupported
 values.
 
+The stored task boundaries include `s1_end` even though later feasibility and
+scoring mostly consume `dma1_end` and `s2_end`.  Direct-v9 uses complete
+snapshot equality when equal `task_end` values decide whether C3 contributes a
+second SINGLE macro stream; `s1_end` cannot in general be reconstructed from
+the two surrounding endpoints without also retaining the chosen shape.
+
 ## Candidate expert pool
 
 For each decision, form the set union of:
 
-1. remaining ranks R0 through R3;
-2. the final two remaining ranks;
-3. any remaining expert concretely named by a C2/C3 prefetch or residency.
+1. remaining ranks R0 through R7;
+2. any remaining expert concretely named by a C2/C3 prefetch or residency.
 
 Remove duplicate IDs. Timing-equivalent experts may be collapsed only when
 their token count and all C2/C3 named-residency/cache observations are equal.
@@ -88,6 +111,12 @@ earliest legal `dma3_end` start and one representative per resulting shape.
 Candidate order is architectural state because it is the final tie-break. RTL
 must reproduce the generator order in the golden model exactly.
 
+Direct-v9 uses a fixed-width numeric physical-action key for its final local
+tie-break.  Shapes are ordered `NONE,A,B,C`, lane masks are ordered
+`NONE,iDMA,xDMA,BOTH`, and all IDs, token counts and Tq timestamps are compared
+as integers.  The archived direct-v8 Python `repr()` ordering is retained only
+for reproducing the old R4 policy and is not an RTL requirement.
+
 ## Exact child transition
 
 Each candidate is rejected unless it satisfies all of the following:
@@ -105,39 +134,88 @@ Each candidate is rejected unless it satisfies all of the following:
 The surviving action is applied with the exact four-stage timing equations.
 The child pathmax is `max(parent.f_score, child_admissible_bound)`.
 
+The P5 transition stores a two-bit physical lane mask for every S1, S3, S2PF
+and S4PF interval: `00=NONE`, `01=iDMA`, `10=xDMA`, `11=BOTH`.  A 64-B/cc
+aggregate bandwidth field is insufficient because two simultaneous one-lane
+transfers are legal only when their masks are disjoint.  Compute shape and DMA
+binding remain independent; in particular Shape C may use one lane and Shape
+A/B may use both lanes.  The baseline aggregate-BW timeline and checker are not
+part of the P5 exact-transition path.
+
 ## Future score and selection
 
-For each exact child:
+For each exact child, first form the mandatory DMA work.  Work is measured in
+cycles on one 64-B/cc lane, or equivalently in `Hq` lane units:
 
 ```text
-load2 = child.c2.task_end_q
-load3 = child.c3.task_end_q
+s1_slots   = distinct concrete remaining S1 reservations + valid ghost slots
+full_slots = distinct concrete remaining full-residency reservations
+s1_slots   = min(child.remaining_count, s1_slots)
+
+dma_work_hq = 8 * (child.remaining_count - s1_slots)
+            + 4 * (child.remaining_count - full_slots)
+```
+
+Starting at the earliest legal relaxed DMA release, sweep the committed S1,
+S2PF, S3 and S4PF interval endpoints.  In each interval subtract
+`interval_hq * free_lane_count` from `dma_work_hq`.  After the final committed
+endpoint both lanes are free.  The first time the work reaches zero is
+`child_dma_finish_hq`.
+
+The only persistent future-bound register is:
+
+```text
+child_dma_pathmax_hq = max(parent_dma_pathmax_hq,
+                           child.c2.task_end_hq,
+                           child.c3.task_end_hq,
+                           child_dma_finish_hq)
+```
+
+The compute, release-chain and critical-chain reference lower bounds are not
+implemented.  The full-list LPT load already dominates them; the DMA-only
+golden path reproduced the complete-bound history on all 4,739 validation
+cases with zero history-hash mismatches.
+
+Then scan the full remaining descriptor list:
+
+```text
+load2 = child.c2.task_end_hq
+load3 = child.c3.task_end_hq
 
 for each remaining expert in descending token rank:
     blocks = (ntok + 1) >> 1
-    duration_q = blocks + (blocks << 1)
+    duration_hq = (blocks << 1) + (blocks << 2)
     if load2 <= load3:
-        load2 += duration_q
+        load2 += duration_hq
     else:
-        load3 += duration_q
+        load3 += duration_hq
 
-lpt_q = max(child.f_score_q, load2, load3)
-key = (lpt_q,
+lpt_hq = max(load2, load3)
+score_hq = max(lpt_hq, child_dma_pathmax_hq)
+key = (score_hq,
        child.remaining_count,
-       max(child.c2.task_end_q, child.c3.task_end_q),
+       max(child.c2.task_end_hq, child.c3.task_end_hq),
        candidate_index)
 ```
 
-Commit the candidate with the lexicographically smallest key.
+Commit the candidate with the lexicographically smallest key.  When it
+commits, `child_dma_pathmax_hq` becomes the parent value for the next round.
+No beam-search `f_score` or fitted coefficient is stored in RTL.
 
 ## Suggested iterative microarchitecture
 
 The minimum-area implementation uses four blocks:
 
-1. pool/macro generator;
+1. descriptor store, valid-mask rank extractor and pool/macro generator;
 2. micro-action instantiator plus legality and exact-transition unit;
 3. candidate-local LPT scanner;
 4. best-key register and action register.
+
+The best-action register stores the complete physical action and resulting
+child state; P5 does not replay a narrow candidate ID through a second local
+search.  This makes the architectural candidate index only a score tie-break
+and prevents replay drift when a macro has multiple shape, S2PF, start or lane
+variants.
 
 The implementation may process one candidate at a time. With K32 and E64,
 the LPT upper bound is 2,048 remaining-entry visits per decision. A one-entry
@@ -153,7 +231,8 @@ not change candidate order or arithmetic.
   SHA-256 and makespan.
 - Per-decision parity: candidate count, serialized candidate fields, score key
   and winning index match Python.
-- All timing fields are exact in `Tq` units with no saturation or rounding.
+- Timeline fields are exact in `Tq`; score and DMA-pathmax fields are exact in
+  `Hq`, with no saturation or rounding.
 - Candidate count never exceeds 32 and every nonterminal state emits at least
   one legal candidate.
 - Complete RTL history passes the independent four-stage history validator.

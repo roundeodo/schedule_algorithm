@@ -1,55 +1,76 @@
 # Scheduler algorithm workspace
 
-This directory contains the frozen R4+bottom2/LPT baseline, the reference
-assets used to derive it, and the active P5 R8/K32 future-ranker derivation.
+This directory now has one active objective: derive a hardware-implementable
+scheduler from a stratified OLMoE-like Top-2 workload suite, while retaining the
+current RTL scheduler and the complete four-stage model as fixed baselines.
 
-Retained code:
+## Active workflow
 
-- `four_stage_scheduler.py`: complete four-stage reference search model.
-- `SCHEDULER_POLICY_SPEC.md`: locked policy-derivation and acceptance contract.
-- `analyze_scheduler_candidates.py`: deterministic reference-history replay and candidate census.
-- `derive_scheduler_policy.py`: bounded-candidate and forced-continuation audits under the design contract.
-- `scheduler_policy_golden.py`: deterministic runtime golden model for the frozen policy.
-- `RTL_POLICY_CONTRACT.md`: state, candidate, scorer and sequencing contract for RTL.
-- `generate_scheduler_strategy_coverage.py`: deterministic 30K distribution generator.
-- `run_four_stage_reference.py`: reference-search runner and action serializer.
-- `verify_scheduler_lower_bounds.py`: lower-bound checks.
-- `eval_c_mirror_v2.py`: current C scheduler mirror.
-- `eval_hw_mirror_s2pf_lite.py`: current hardware-oriented baseline mirror.
-- `evaluate_scheduler_baselines.py`: baseline-versus-reference evaluator.
+1. `generate_olmoe_top2_projection_cases.py` generates the exact-70-token,
+   64-expert, Top-2 suite.  The core is stratified by top1/mean hotness
+   (`6--8x`, `8--12x`, `12--14x`), two/three/four local hotspots, active-expert
+   count, and cold-expert count.
+2. `run_olmoe_optimal_path_pass1.sh` runs unrestricted four-stage beam seeds to
+   obtain replay-valid upper bounds.  This pass does not impose a hardware
+   candidate window and does not call a time-limited result optimal.
+3. `prove_top4_bottom2_directed.py` and
+   `run_isolated_directed_proofs.py` perform selective branch-and-bound and
+   history replay.  Only a closed lower/upper-bound gap is an optimality
+   certificate.
+4. After the target histories are certified, the generic directed-case tools
+   evaluate candidate-window coverage, candidate actions, and scorer quality in
+   that order.  Window and scorer conclusions from the deleted pre-v3 suites
+   are not carried forward.
+5. `run_olmoe_min2_supplement_pass1.sh` covers the separate supplement in
+   which zero-load experts are allowed but every active expert has at least two
+   tokens.  It is run after the active v3 base pass, not concurrently with it.
 
-Retained data:
+## Current inputs and results
 
-- `scheduler_strategy_coverage_E{8,32,64}.json`: 30K input distributions.
-- `results/final_reference/scheduler_reference_E{8,32,64}.json`: full reference results and action histories.
-- `results/final_reference/scheduler_reference_E{8,32,64}_compact.json`: compact result views.
-- `results/final_reference/scheduler_reference_manifest.json`: reference provenance and summary.
+- `results/policy_search/olmoe_top2_projection_cases_v3.json`: current target
+  distributions.
+- `results/policy_search/olmoe_top2_projection_v3_pass1_full_seed_w8_w16.*`:
+  current resumable pass-1 output, log, and PID.
+- `results/policy_search/.proof_fragments/olmoe_v3_pass1_full_seed_w8_w16/`:
+  current per-case checkpoints.
+- `results/policy_search/olmoe_top2_projection_v2_best_known.json`: temporary
+  prior used only to seed matching v3 anchor cases.  Remove it after pass 1 has
+  completed and the v3 result is self-contained.
+- `results/policy_search/olmoe_top2_projection_min2_supplement_v1.json`: 22
+  additional exact-total cases with minimum positive expert load equal to two.
 
-Frozen evaluated baseline:
+## Core models and reusable tools
 
-- candidate generator: `direct-slot-conditional-cache-v8`;
-- expert pool: top 4, bottom 2 and concrete resident/prefetched IDs;
-- maximum candidates per decision: 32;
-- score: exact child transition followed by integer two-cluster LPT;
-- tie-break: remaining count, later cluster completion, candidate index.
+- `four_stage_scheduler.py`: complete explicit-DMA four-stage reference model.
+- `run_four_stage_reference.py`: reference runner and action serialization.
+- `evaluate_top4_bottom2_directed.py`: directed case and lower-bound utilities.
+- `scheduler_hw_fixed_policy.py`: current hardware-oriented policy state model.
+- `scheduler_top4_bottom2_policy.py`: candidate policy used as a lowering hint;
+  it is not an optimality oracle.
+- `scheduler_rtl_adaptive_prefetch_policy.py`: adaptive-prefetch policy mirror.
+- `evaluate_directed_window_grid.py`: candidate-window coverage evaluator.
+- `evaluate_directed_candidate_score_ablation.py`: scorer ablation evaluator.
+- `analyze_directed_case_classification.py`: certificate/history classifier.
+- `merge_top4_bottom2_proofs.py`: proof-result merger.
 
-`derive_scheduler_policy.py` retains alternative scorer code only as derivation
-evidence. The selected runtime path is owned by `scheduler_policy_golden.py`
-and does not read a fitted model or coefficient file.
+## Retained baselines
 
-Evaluation status:
+The remaining large JSON files in `results/policy_search/` are intentional:
 
-- discovery: 14,118 proven cases, mean ratio 1.010770, p95 1.032680;
-- validation: 4,739 proven cases, mean ratio 1.011394, p95 1.034483;
-- one-time blind test: 4,732 proven cases, mean ratio 1.010404, p95 1.032258;
-- blind current-hardware baseline: mean ratio 1.023345, p95 1.117647.
+- current-HW and scheduler-strategy 30K comparisons;
+- current-HW tail and candidate/scorer evidence;
+- S2/S4 prefetch causal ablations;
+- the final bounded-policy freeze and canonical-validation records.
 
-The blind test was opened only after implementation hashes were recorded. The
-policy passed without post-blind changes and was accepted as the v1 RTL target
-before the active P5 R8/window revision was opened.
+`SCHEDULER_POLICY_SPEC.md` and `RTL_POLICY_CONTRACT.md` document historical
+policies and prior RTL decisions.  They are retained as comparison evidence,
+not as the specification of the active v3 search.
 
-Active P5 work does not modify that baseline report or golden model.  It uses
-an ordered top8/K32 generator and a mode-selected shift/add ranker trained from
-interval-valued forced continuations.  Its formal dataset is
-`results/policy_search/r8_future_rank_dataset_v1.jsonl`; no P5 model becomes an
-RTL target before the gates in `SCHEDULER_POLICY_SPEC.md` pass.
+## Evidence rules
+
+- A replay-valid schedule without a closed bound is an upper bound only.
+- A timeout or expansion limit is not proof of optimality or infeasibility.
+- Candidate-window sufficiency is tested only after a reference history is
+  available and is separate from scorer accuracy.
+- All policy comparisons use identical input distributions and preserve the
+  current-HW and four-stage baselines.

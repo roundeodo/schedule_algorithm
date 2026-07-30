@@ -202,6 +202,27 @@ FOREGROUND_S1_SHAPES = (SHAPE_A, SHAPE_B, SHAPE_C)
 FOREGROUND_S3_SHAPES = (SHAPE_B, SHAPE_C)
 SHAPE_RANK = {shape: i for i, shape in enumerate(ALL_SHAPES)}
 
+# Every legal event time is built from zero by adding one of these compute/DMA
+# atoms and taking maxima of existing endpoints.  Therefore every schedule
+# makespan lies on this exact lattice.  Exact target search may advance a
+# certified lower bound by one lattice quantum after exhaustive infeasibility;
+# it must never advance by an empirically observed coarser block size.
+_SCHEDULE_TIMING_ATOMS_CC = tuple(
+    shape.T_s1 for shape in ALL_SHAPES
+) + tuple(
+    shape.T_s3 for shape in ALL_SHAPES
+) + tuple(
+    dma_duration(weight_bytes, binding)
+    for weight_bytes in (WEIGHT_BYTES_S1, WEIGHT_BYTES_S3)
+    for binding in DMA_BINDINGS
+)
+SCHEDULE_TIME_QUANTUM_CC = math.gcd(*_SCHEDULE_TIMING_ATOMS_CC)
+if any(
+    duration % SCHEDULE_TIME_QUANTUM_CC
+    for duration in _SCHEDULE_TIMING_ATOMS_CC
+):
+    raise AssertionError("schedule timing atoms do not share the declared lattice")
+
 # Reference-beam action generation has no expert-rank cap.  Runtime is bounded
 # by beam_width; generation removes hardware-illegal, exactly equivalent, or
 # analytically dominated choices.
@@ -1025,6 +1046,7 @@ def _snap_future_key(s: FourStageSnap, swap_lanes: bool = False) -> tuple:
     )
 
 
+@lru_cache(maxsize=524_288)
 def _canonical_snap_pair_key(c2: FourStageSnap, c3: FourStageSnap) -> tuple:
     """Canonicalize identical clusters and the two identical 64-B/cc DMA lanes."""
     variants = []
@@ -1035,6 +1057,75 @@ def _canonical_snap_pair_key(c2: FourStageSnap, c3: FourStageSnap) -> tuple:
     return min(variants)
 
 
+def _canonical_state_future_key(
+    c2: FourStageSnap,
+    c3: FourStageSnap,
+    remaining: Tuple[Tuple[int, int], ...],
+) -> tuple:
+    """Canonicalize cluster/lane symmetry and interchangeable expert IDs.
+
+    Expert IDs have no timing meaning.  A positive ID affects the future only
+    when a cluster's resident/prefetch slot names that same remaining expert.
+    Therefore states which differ solely by a permutation of equal-token,
+    equally-resident experts have exactly the same legal continuations.  The
+    action generator already uses this equivalence; applying it to the search
+    fingerprint prevents the many 1/2-token experts in MoE distributions from
+    recreating identical subtrees under different numeric IDs.
+
+    The canonical key still preserves:
+      * the token count of every remaining expert and its multiplicity;
+      * whether C2/C3 name the same expert or two different experts;
+      * which named expert has which token count; and
+      * every timing, bandwidth, cache-fullness, cluster, and DMA-lane field.
+    """
+    if c2.pf_eid < 0 and c3.pf_eid < 0:
+        # Common stage-assignment path: without a concrete named resident,
+        # only the multiset of remaining token counts is observable.  Avoid
+        # rebuilding four relabelled variants for this exact fast path.
+        a, b = _canonical_snap_pair_key(c2, c3)
+        # ``remaining`` is initially ranked by token count and every transition
+        # only removes entries, so its token-count projection is already sorted.
+        return (a, b, tuple(ntok for _eid, ntok in remaining))
+
+    remaining_by_eid = dict(remaining)
+    variants = []
+    for swap_clusters in (False, True):
+        first, second = (c3, c2) if swap_clusters else (c2, c3)
+        for swap_lanes in (False, True):
+            # Assign stable small labels in the selected cluster order.  Taking
+            # the minimum over both cluster orders below removes label-choice
+            # bias while retaining the same-target/different-target relation.
+            named_labels: Dict[int, int] = {}
+            for snap in (first, second):
+                eid = snap.pf_eid
+                if eid >= 0 and eid in remaining_by_eid and eid not in named_labels:
+                    named_labels[eid] = len(named_labels)
+
+            def snap_key(snap: FourStageSnap) -> tuple:
+                key = list(_snap_future_key(snap, swap_lanes))
+                if snap.pf_eid >= 0:
+                    # 0/1 identify a remaining named expert.  2 means that the
+                    # occupied slot names no remaining expert; its numeric ID
+                    # can no longer produce a future hit and is immaterial.
+                    key[12] = named_labels.get(snap.pf_eid, 2)
+                return tuple(key)
+
+            remaining_key = tuple(
+                sorted(
+                    (
+                        ntok,
+                        named_labels.get(eid, -1),
+                    )
+                    for eid, ntok in remaining
+                )
+            )
+            variants.append(
+                (snap_key(first), snap_key(second), remaining_key)
+            )
+    return min(variants)
+
+
+@lru_cache(maxsize=262_144)
 def _canonical_s2pf_base_pair_key(
     c2: FourStageSnap, c3: FourStageSnap
 ) -> tuple:
@@ -1055,6 +1146,7 @@ class BeamState:
     history: Tuple[StageAction, ...]
     g_score: int
     f_score: int
+    cluster_work_cc: int = 0
 
     def __lt__(self, other: "BeamState") -> bool:
         if self.f_score != other.f_score:
@@ -1062,11 +1154,7 @@ class BeamState:
         return self.g_score < other.g_score
 
     def fingerprint(self) -> tuple:
-        # C2/C3 have identical timing and BW semantics in this model.  Swapping
-        # their complete snapshots cannot change any future action or makespan.
-        # Canonicalizing the pair removes only this exact physical symmetry.
-        a, b = _canonical_snap_pair_key(self.c2, self.c3)
-        return (a, b, self.remaining)
+        return _canonical_state_future_key(self.c2, self.c3, self.remaining)
 
 
 # ============================================================
@@ -1079,6 +1167,22 @@ def _best_task_time(ntok: int) -> int:
     return min(s.T_s1_task(ntok) for s in ALL_SHAPES) + min(
         s.T_s3_task(ntok) for s in ALL_SHAPES
     )
+
+
+@lru_cache(maxsize=4096)
+def _minimum_cluster_work(
+    remaining: Tuple[Tuple[int, int], ...]
+) -> int:
+    """Relaxed sum of per-expert cluster occupancy for capacity pruning."""
+    return sum(_best_task_time(ntok) for _eid, ntok in remaining)
+
+
+def _cluster_work_capacity_lb(
+    cluster_work_cc: int, remaining: Tuple[Tuple[int, int], ...]
+) -> int:
+    """Admissible makespan LB from total occupied two-cluster capacity."""
+    total = cluster_work_cc + _minimum_cluster_work(remaining)
+    return (total + 1) // 2
 
 
 @lru_cache(maxsize=None)
@@ -1676,6 +1780,10 @@ def _gen_stage_actions_cached(
     c3: FourStageSnap,
     remaining: Tuple[Tuple[int, int], ...],
     seed_mode: bool = False,
+    seed_all_visible: bool = False,
+    work_budget_cc: int = -1,
+    capacity_limit_cc: int = -1,
+    makespan_limit_cc: int = -1,
 ) -> Tuple[StageAction, ...]:
     """
     生成所有合法的 ASSIGN / WAIT 动作。
@@ -1718,8 +1826,39 @@ def _gen_stage_actions_cached(
         next_c3: FourStageSnap,
         consumed_eids: Tuple[int, ...],
     ) -> None:
-        a, b = _canonical_snap_pair_key(next_c2, next_c3)
-        key = (a, b, tuple(sorted(set(consumed_eids))))
+        consumed = set(consumed_eids)
+        next_remaining = tuple(
+            (eid, ntok) for eid, ntok in remaining if eid not in consumed
+        )
+        if work_budget_cc >= 0:
+            added_work = 0
+            if next_c2.cur_eid in consumed:
+                added_work += next_c2.task_end - next_c2.task_start
+            if next_c3.cur_eid in consumed:
+                added_work += next_c3.task_end - next_c3.task_start
+            if (
+                added_work + _minimum_cluster_work(next_remaining)
+                > work_budget_cc
+            ):
+                return
+        if (
+            capacity_limit_cc >= 0
+            and next_c2.task_end
+            + next_c3.task_end
+            + _minimum_cluster_work(next_remaining)
+            > capacity_limit_cc
+        ):
+            return
+        if (
+            makespan_limit_cc >= 0
+            and state_lower_bound(next_c2, next_c3, next_remaining)
+            > makespan_limit_cc
+        ):
+            return
+        # Keep one concrete action for every exact future state.  Numeric expert
+        # IDs are not a physical resource, so consuming E7 rather than an
+        # equal-token, equally-resident E9 must not recreate the same subtree.
+        key = _canonical_state_future_key(next_c2, next_c3, next_remaining)
         if key in action_state_seen:
             return
         action_state_seen.add(key)
@@ -1745,7 +1884,7 @@ def _gen_stage_actions_cached(
         return pairs
 
     def seed_expert_indices(indices: List[int], limit: int) -> List[int]:
-        if not seed_mode or len(indices) <= limit:
+        if not seed_mode or seed_all_visible or len(indices) <= limit:
             return indices
         selected = list(indices[:limit])
         named = {c2.pf_eid, c3.pf_eid}
@@ -1791,8 +1930,38 @@ def _gen_stage_actions_cached(
             now, sB1, sB3, ntokB, eidB, c3_sw, c3_dn,
             dma_s1=dB1, dma_s3=dB3,
         )
+        if capacity_limit_cc >= 0:
+            next_remaining = tuple(
+                (eid, ntok)
+                for eid, ntok in remaining
+                if eid not in {eidA, eidB}
+            )
+            # Optimistically make down weights ready exactly at S2 end.  If
+            # even this per-profile relaxation misses the target capacity,
+            # neither normal S3 nor any legal S2PF variant can recover it.
+            optimistic_end_sum = (
+                sna.s2_end
+                + _best_s4_compute(ntokA)
+                + snb.s2_end
+                + _best_s4_compute(ntokB)
+            )
+            if (
+                optimistic_end_sum
+                + _minimum_cluster_work(next_remaining)
+                > capacity_limit_cc
+            ):
+                return []
         base_a, base_b = _canonical_s2pf_base_pair_key(sna, snb)
-        base_key = (base_a, base_b, tuple(sorted({eidA, eidB})))
+        consumed = {eidA, eidB}
+        base_key = (
+            base_a,
+            base_b,
+            tuple(
+                ntok
+                for eid, ntok in remaining
+                if eid not in consumed
+            ),
+        )
         if base_key in base_pair_seen:
             return []
         base_pair_seen.add(base_key)
@@ -2003,6 +2172,25 @@ def _gen_stage_actions_cached(
                             dma_s1=s1_dma,
                             dma_s3=s3_dma,
                         )
+                        if capacity_limit_cc >= 0:
+                            next_remaining = tuple(
+                                (other_eid, other_ntok)
+                                for other_eid, other_ntok in remaining
+                                if other_eid != eid
+                            )
+                            optimistic_end = (
+                                sn0.s2_end + _best_s4_compute(ntok)
+                            )
+                            if cluster_id == 2:
+                                optimistic_sum = optimistic_end + peer.task_end
+                            else:
+                                optimistic_sum = peer.task_end + optimistic_end
+                            if (
+                                optimistic_sum
+                                + _minimum_cluster_work(next_remaining)
+                                > capacity_limit_cc
+                            ):
+                                continue
                         if seed_mode:
                             greedy_sn = with_optional_s2_down_prefetch(sn0, s3, peer)
                             variants = (sn0,) if greedy_sn == sn0 else (sn0, greedy_sn)
@@ -2099,9 +2287,24 @@ def gen_stage_actions(
     remaining: Tuple[Tuple[int, int], ...],
     *,
     seed_mode: bool = False,
+    seed_all_visible: bool = False,
+    work_budget_cc: int = -1,
+    capacity_limit_cc: int = -1,
+    makespan_limit_cc: int = -1,
 ) -> List[StageAction]:
     """Return cached, future-distinct legal stage actions as a mutable list."""
-    return list(_gen_stage_actions_cached(c2, c3, remaining, seed_mode))
+    return list(
+        _gen_stage_actions_cached(
+            c2,
+            c3,
+            remaining,
+            seed_mode,
+            seed_all_visible,
+            work_budget_cc,
+            capacity_limit_cc,
+            makespan_limit_cc,
+        )
+    )
 
 
 def gen_prefetch_actions(
@@ -2110,15 +2313,20 @@ def gen_prefetch_actions(
     remaining: Tuple[Tuple[int, int], ...],
     *,
     seed_mode: bool = False,
+    seed_all_visible: bool = False,
+    work_budget_cc: int = -1,
+    capacity_limit_cc: int = -1,
+    makespan_limit_cc: int = -1,
 ) -> List[StageAction]:
     """在 S3+S4 期间生成下一 expert 的 S1 Prefetch 动作（不消耗 remaining）。"""
     if not remaining:
         return []
     pf_actions: List[StageAction] = []
+    future_seen = set()
     target_indices = _pair_candidate_indices(
         remaining, c2, c3, min(c2.task_end, c3.task_end), False
     )
-    if seed_mode and len(target_indices) > 4:
+    if seed_mode and not seed_all_visible and len(target_indices) > 4:
         named = {c2.pf_eid, c3.pf_eid}
         target_indices = list(target_indices[:4]) + [
             index
@@ -2150,6 +2358,40 @@ def gen_prefetch_actions(
                     )
                     if not bw_feasible(cand, peer):
                         continue
+                    if work_budget_cc >= 0:
+                        added_work = max(0, cand.task_end - cl.task_end)
+                        if (
+                            added_work + _minimum_cluster_work(remaining)
+                            > work_budget_cc
+                        ):
+                            continue
+                    if (
+                        capacity_limit_cc >= 0
+                        and (
+                            (cand.task_end if cl_id == 2 else peer.task_end)
+                            + (peer.task_end if cl_id == 2 else cand.task_end)
+                            + _minimum_cluster_work(remaining)
+                            > capacity_limit_cc
+                        )
+                    ):
+                        continue
+                    next_c2, next_c3 = (
+                        (cand, peer) if cl_id == 2 else (peer, cand)
+                    )
+                    if (
+                        makespan_limit_cc >= 0
+                        and state_lower_bound(next_c2, next_c3, remaining)
+                        > makespan_limit_cc
+                    ):
+                        continue
+                    future_key = _canonical_state_future_key(
+                        next_c2,
+                        next_c3,
+                        remaining,
+                    )
+                    if future_key in future_seen:
+                        continue
+                    future_seen.add(future_key)
                     if cl_id == 2:
                         pf_actions.append(
                             StageAction(
@@ -2220,6 +2462,10 @@ def apply_action(state: BeamState, action: StageAction) -> BeamState:
         )
         new_rem = tuple(rem)
         g = max(new_c2.task_end, new_c3.task_end)
+        cluster_work = (
+            state.cluster_work_cc
+            + max(0, new_c2.task_end - c2.task_end)
+        )
         return BeamState(
             c2=new_c2,
             c3=new_c3,
@@ -2233,7 +2479,9 @@ def apply_action(state: BeamState, action: StageAction) -> BeamState:
             f_score=max(
                 state.f_score,
                 state_lower_bound(new_c2, new_c3, new_rem),
+                _cluster_work_capacity_lb(cluster_work, new_rem),
             ),
+            cluster_work_cc=cluster_work,
         )
     if action.c3_eid == -2:
         new_c3 = c3.with_prefetch(
@@ -2241,6 +2489,10 @@ def apply_action(state: BeamState, action: StageAction) -> BeamState:
         )
         new_rem = tuple(rem)
         g = max(new_c2.task_end, new_c3.task_end)
+        cluster_work = (
+            state.cluster_work_cc
+            + max(0, new_c3.task_end - c3.task_end)
+        )
         return BeamState(
             c2=new_c2,
             c3=new_c3,
@@ -2250,7 +2502,9 @@ def apply_action(state: BeamState, action: StageAction) -> BeamState:
             f_score=max(
                 state.f_score,
                 state_lower_bound(new_c2, new_c3, new_rem),
+                _cluster_work_capacity_lb(cluster_work, new_rem),
             ),
+            cluster_work_cc=cluster_work,
         )
 
     if action.c2_eid >= 0:
@@ -2286,6 +2540,19 @@ def apply_action(state: BeamState, action: StageAction) -> BeamState:
 
     new_rem = tuple((e, n) for e, n in rem if e not in consumed)
     g = max(new_c2.task_end, new_c3.task_end)
+    cluster_work = (
+        state.cluster_work_cc
+        + (
+            new_c2.task_end - new_c2.task_start
+            if action.c2_eid >= 0
+            else 0
+        )
+        + (
+            new_c3.task_end - new_c3.task_start
+            if action.c3_eid >= 0
+            else 0
+        )
+    )
     return BeamState(
         c2=new_c2,
         c3=new_c3,
@@ -2295,7 +2562,9 @@ def apply_action(state: BeamState, action: StageAction) -> BeamState:
         f_score=max(
             state.f_score,
             state_lower_bound(new_c2, new_c3, new_rem),
+            _cluster_work_capacity_lb(cluster_work, new_rem),
         ),
+        cluster_work_cc=cluster_work,
     )
 
 
@@ -2606,6 +2875,11 @@ def _select_reference_beam(candidates: List[BeamState], beam_width: int) -> List
 
 def _lpt_completion_estimate(state: BeamState) -> int:
     """Original non-cached LPT estimate, retained as a stable rollout lane."""
+    return max(state.f_score, _lpt_load_completion_estimate(state))
+
+
+def _lpt_load_completion_estimate(state: BeamState) -> int:
+    """Two-lane LPT load estimate without the search-only pathmax bound."""
     ends = [state.c2.task_end, state.c3.task_end]
     durations = sorted(
         (_best_task_time(ntok) for _, ntok in state.remaining), reverse=True
@@ -2613,7 +2887,7 @@ def _lpt_completion_estimate(state: BeamState) -> int:
     for duration in durations:
         idx = 0 if ends[0] <= ends[1] else 1
         ends[idx] += duration
-    return max(state.f_score, max(ends))
+    return max(ends)
 
 
 def _cache_aware_completion_estimate(state: BeamState) -> int:
@@ -2664,6 +2938,129 @@ class AnytimeSearchResult:
     pruned_by_bound: int
     runtime_s: float
     termination: str
+
+
+def normalize_candidate_window(
+    candidate_window: Optional[Tuple[int, int]],
+) -> Optional[Tuple[int, int]]:
+    """Validate and canonicalize a bounded TOP+BOTTOM expert window."""
+    if candidate_window is None:
+        return None
+    if len(candidate_window) != 2:
+        raise ValueError("candidate_window must be a (top, bottom) pair")
+    top, bottom = (int(candidate_window[0]), int(candidate_window[1]))
+    if top <= 0 or bottom < 0:
+        raise ValueError(
+            "candidate_window top must be positive and bottom non-negative"
+        )
+    return top, bottom
+
+
+def candidate_window_visible_eids(
+    c2: FourStageSnap,
+    c3: FourStageSnap,
+    remaining: Tuple[Tuple[int, int], ...],
+    candidate_window: Optional[Tuple[int, int]],
+) -> frozenset[int]:
+    """Return expert IDs observable through TOP+BOTTOM plus resident slots.
+
+    A concrete prefetch target is already named scheduler state.  It remains
+    usable after rank changes move it outside the current window; hiding it
+    would make the software-visible window stricter than the bounded hardware
+    buffer whose resident slot already contains that expert.
+    """
+    candidate_window = normalize_candidate_window(candidate_window)
+    if candidate_window is None:
+        return frozenset(eid for eid, _ntok in remaining)
+    top, bottom = candidate_window
+    entries = len(remaining)
+    indices = list(range(min(top, entries)))
+    if bottom:
+        indices.extend(range(max(min(top, entries), entries - bottom), entries))
+    rank_by_eid = {eid: index for index, (eid, _ntok) in enumerate(remaining)}
+    for snap in (c2, c3):
+        if snap.pf_eid in rank_by_eid:
+            indices.append(rank_by_eid[snap.pf_eid])
+    return frozenset(
+        remaining[index][0] for index in dict.fromkeys(indices)
+    )
+
+
+def candidate_window_remaining(
+    c2: FourStageSnap,
+    c3: FourStageSnap,
+    remaining: Tuple[Tuple[int, int], ...],
+    candidate_window: Optional[Tuple[int, int]],
+) -> Tuple[Tuple[int, int], ...]:
+    """Return the ordered expert list from which window actions are generated.
+
+    Window selection must precede expert-class symmetry reduction.  Generating
+    from the full list first can retain two hidden representatives of a large
+    equal-load class and then filter out the actually visible bottom entries.
+    """
+    visible_eids = candidate_window_visible_eids(
+        c2, c3, remaining, candidate_window
+    )
+    return tuple(item for item in remaining if item[0] in visible_eids)
+
+
+def action_within_candidate_window(
+    action: StageAction, visible_eids: frozenset[int]
+) -> bool:
+    """Whether every expert explicitly named by an action is observable."""
+    targets = {
+        eid
+        for eid in (action.c2_eid, action.c3_eid, action.pf_eid)
+        if eid >= 0
+    }
+    return targets.issubset(visible_eids)
+
+
+@dataclass(frozen=True)
+class TargetFeasibilityCheckpoint:
+    """Serializable exact OPEN/CLOSED state for target-search continuation."""
+
+    target_makespan: int
+    rank_mode: str
+    candidate_window: Optional[Tuple[int, int]]
+    generator_bound_pruning: bool
+    future_work_dominance: bool
+    rank_heap: List[tuple]
+    active_entries: set
+    open_by_fingerprint: Dict[tuple, Tuple[int, int]]
+    closed_best_work: Dict[tuple, int]
+    next_entry_id: int
+    peak_open_states: int
+    expansions: int
+    generated: int
+    pruned_by_bound: int
+    runtime_s: float
+
+
+@dataclass(frozen=True)
+class TargetFeasibilityResult:
+    """Exact decision result for ``makespan <= target_makespan``.
+
+    ``feasible`` is backed by ``history`` and must be replayed by the caller.
+    ``exhaustive`` is true only when every future-distinct legal state within
+    the admissible target bounds has been exhausted.  In that case a false
+    ``feasible`` value is a proof that the requested target is impossible in
+    this reference model.
+    """
+
+    target_makespan: int
+    feasible: bool
+    exhaustive: bool
+    history: Tuple[StageAction, ...]
+    expansions: int
+    generated: int
+    pruned_by_bound: int
+    open_states: int
+    closed_states: int
+    peak_open_states: int
+    runtime_s: float
+    termination: str
+    checkpoint: Optional[TargetFeasibilityCheckpoint] = None
 
 
 # ============================================================
@@ -2907,6 +3304,8 @@ class FourStageScheduler:
         incumbent_history: Optional[Tuple[StageAction, ...]] = None,
         initial_state: Optional[BeamState] = None,
         incumbent_state: Optional[BeamState] = None,
+        target_work_pruning: bool = True,
+        generator_bound_pruning: bool = False,
     ) -> AnytimeSearchResult:
         """Anytime best-first branch-and-bound with a reportable optimality gap.
 
@@ -2967,10 +3366,21 @@ class FourStageScheduler:
         closed_best: Dict[tuple, int] = {}
         serial = count()
 
+        def search_fingerprint(state: BeamState) -> tuple:
+            # Future-equivalent states with different past cluster occupancy
+            # have different remaining target-capacity slack.  Keep that value
+            # in exact OPEN/CLOSED dominance while leaving the normal beam
+            # fingerprint purely future-oriented.
+            return (
+                (state.fingerprint(), state.cluster_work_cc)
+                if target_work_pruning
+                else state.fingerprint()
+            )
+
         def push(state: BeamState) -> bool:
             if state.f_score >= best_makespan:
                 return False
-            fp = state.fingerprint()
+            fp = search_fingerprint(state)
             closed_lb = closed_best.get(fp)
             if closed_lb is not None and closed_lb <= state.f_score:
                 return False
@@ -3023,7 +3433,7 @@ class FourStageScheduler:
                 break
             _, _, _, entry_id, state = heapq.heappop(rank_heap)
             active_entries.discard(entry_id)
-            fp = state.fingerprint()
+            fp = search_fingerprint(state)
             current_open = open_by_fp.get(fp)
             if current_open is not None and current_open[1] == entry_id:
                 del open_by_fp[fp]
@@ -3034,10 +3444,38 @@ class FourStageScheduler:
             closed_best[fp] = state.f_score
             expansions += 1
 
-            actions = gen_stage_actions(state.c2, state.c3, state.remaining)
+            # Any schedule strictly better than the incumbent has final
+            # makespan at most ``best_makespan - 1`` in integer cc.  Across two
+            # clusters, its total occupied time cannot exceed twice that
+            # target.  Remaining work is relaxed to isolated per-expert minima,
+            # so this budget can only retain extra actions, never remove a
+            # genuinely improving completion.
+            target_makespan = best_makespan - 1
+            work_budget = (
+                2 * target_makespan - state.cluster_work_cc
+                if target_work_pruning
+                else -1
+            )
+            actions = gen_stage_actions(
+                state.c2,
+                state.c3,
+                state.remaining,
+                work_budget_cc=work_budget,
+                capacity_limit_cc=2 * target_makespan,
+                makespan_limit_cc=(
+                    target_makespan if generator_bound_pruning else -1
+                ),
+            )
             if self.enable_prefetch:
                 actions += gen_prefetch_actions(
-                    state.c2, state.c3, state.remaining
+                    state.c2,
+                    state.c3,
+                    state.remaining,
+                    work_budget_cc=work_budget,
+                    capacity_limit_cc=2 * target_makespan,
+                    makespan_limit_cc=(
+                        target_makespan if generator_bound_pruning else -1
+                    ),
                 )
             generated += len(actions)
 
@@ -3079,6 +3517,392 @@ class FourStageScheduler:
             termination=termination,
         )
 
+    def run_target_feasibility(
+        self,
+        target_makespan: int,
+        *,
+        time_limit_s: Optional[float] = None,
+        max_expansions: Optional[int] = None,
+        initial_state: Optional[BeamState] = None,
+        initial_states: Optional[Tuple[BeamState, ...]] = None,
+        generator_bound_pruning: bool = False,
+        future_work_dominance: bool = True,
+        rank_mode: str = "completion",
+        candidate_window: Optional[Tuple[int, int]] = None,
+        checkpoint: Optional[TargetFeasibilityCheckpoint] = None,
+    ) -> TargetFeasibilityResult:
+        """Decide whether a legal schedule can finish by ``target_makespan``.
+
+        This is a complete best-first search, not a beam.  The target enables
+        two safe capacity tests that are substantially stronger than ordinary
+        anytime search on tight MoE distributions:
+
+        * the admissible state lower bound must not exceed the target; and
+        * committed cluster release times plus the minimum remaining cluster
+          occupancy must fit in the two-cluster horizon ending at the target.
+
+        The action generator still enumerates the complete future-distinct
+        reference action set.  Non-admissible completion estimates affect only
+        expansion order.  OPEN exhaustion therefore certifies infeasibility.
+        """
+        if target_makespan < 0:
+            raise ValueError("target_makespan must be non-negative")
+        if time_limit_s is not None and time_limit_s <= 0:
+            raise ValueError("time_limit_s must be positive")
+        if max_expansions is not None and max_expansions <= 0:
+            raise ValueError("max_expansions must be positive")
+        if initial_state is not None and initial_states is not None:
+            raise ValueError("initial_state and initial_states are mutually exclusive")
+        if checkpoint is not None and (
+            initial_state is not None or initial_states is not None
+        ):
+            raise ValueError("checkpoint and initial state(s) are mutually exclusive")
+        if rank_mode not in {
+            "completion",
+            "depth",
+            "balance",
+            "lpt",
+            "cache",
+            "hot_tail",
+            "dma",
+        }:
+            raise ValueError(f"unknown target rank mode {rank_mode!r}")
+        candidate_window = normalize_candidate_window(candidate_window)
+
+        started = time.perf_counter()
+        target_capacity = 2 * target_makespan
+
+        def within_target(state: BeamState) -> bool:
+            if state.f_score > target_makespan:
+                return False
+            # A cluster cannot execute future work before its currently
+            # committed task_end.  The remaining occupancy is independently
+            # relaxed to the best isolated time of every expert, so this is a
+            # necessary (and therefore safe) target-capacity condition.
+            return (
+                state.c2.task_end
+                + state.c3.task_end
+                + _minimum_cluster_work(state.remaining)
+                <= target_capacity
+            )
+
+        if checkpoint is not None:
+            if (
+                checkpoint.target_makespan != target_makespan
+                or checkpoint.rank_mode != rank_mode
+                or checkpoint.candidate_window != candidate_window
+                or checkpoint.generator_bound_pruning
+                != generator_bound_pruning
+                or checkpoint.future_work_dominance
+                != future_work_dominance
+            ):
+                raise ValueError("target checkpoint configuration mismatch")
+            rank_heap = list(checkpoint.rank_heap)
+            heapq.heapify(rank_heap)
+            active_entries = set(checkpoint.active_entries)
+            open_by_fingerprint = dict(checkpoint.open_by_fingerprint)
+            closed_best_work = dict(checkpoint.closed_best_work)
+            next_entry_id = checkpoint.next_entry_id
+            peak_open_states = checkpoint.peak_open_states
+            expansions = checkpoint.expansions
+            generated = checkpoint.generated
+            pruned_by_bound = checkpoint.pruned_by_bound
+            accumulated_runtime_s = checkpoint.runtime_s
+            viable_initials: Tuple[BeamState, ...] = ()
+        else:
+            if initial_states is not None:
+                initials = tuple(initial_states)
+                if not initials:
+                    raise ValueError("initial_states must not be empty")
+            else:
+                initials = (
+                    initial_state
+                    if initial_state is not None
+                    else self._initial_state(),
+                )
+            viable_initials = tuple(
+                state for state in initials if within_target(state)
+            )
+            if not viable_initials:
+                return TargetFeasibilityResult(
+                    target_makespan=target_makespan,
+                    feasible=False,
+                    exhaustive=True,
+                    history=(),
+                    expansions=0,
+                    generated=0,
+                    pruned_by_bound=1,
+                    open_states=0,
+                    closed_states=0,
+                    peak_open_states=0,
+                    runtime_s=time.perf_counter() - started,
+                    termination="root_bound",
+                )
+            rank_heap: List[tuple] = []
+            active_entries = set()
+            open_by_fingerprint: Dict[tuple, Tuple[int, int]] = {}
+            closed_best_work: Dict[tuple, int] = {}
+            next_entry_id = 0
+            peak_open_states = 0
+            expansions = 0
+            generated = 0
+            pruned_by_bound = 0
+            accumulated_runtime_s = 0.0
+
+        def target_rank(state: BeamState) -> tuple:
+            completion = completion_estimate(state)
+            if rank_mode == "depth":
+                return (len(state.remaining), completion)
+            if rank_mode == "balance":
+                return (
+                    abs(state.c2.task_end - state.c3.task_end),
+                    len(state.remaining),
+                    completion,
+                )
+            if rank_mode == "lpt":
+                return (_lpt_completion_estimate(state), len(state.remaining))
+            if rank_mode == "cache":
+                return (
+                    _cache_aware_completion_estimate(state),
+                    len(state.remaining),
+                )
+            if rank_mode == "hot_tail":
+                # The certified OLMoE schedules repeatedly clear the 3--8
+                # token middle plateau before interleaving >8-token hotspots
+                # with the 1/2-token tail.  This is an OPEN ordering hint only:
+                # every exact state remains present until expanded/dominated.
+                middle_blocks = sum(
+                    (ntok + FULL_M_DIM - 1) // FULL_M_DIM
+                    for _eid, ntok in state.remaining
+                    if 3 <= ntok <= 8
+                )
+                hot_blocks = sum(
+                    (ntok + FULL_M_DIM - 1) // FULL_M_DIM
+                    for _eid, ntok in state.remaining
+                    if ntok > 8
+                )
+                return (
+                    len(state.remaining),
+                    middle_blocks,
+                    -hot_blocks,
+                    completion,
+                )
+            if rank_mode == "dma":
+                dma_finish = state_lower_bound_components(
+                    state.c2, state.c3, state.remaining
+                )["dma_capacity_cc"]
+                return (dma_finish, len(state.remaining), completion)
+            return (completion, len(state.remaining))
+
+        def push(state: BeamState) -> bool:
+            nonlocal peak_open_states, next_entry_id
+            if not within_target(state):
+                return False
+            # For an identical future state, lower historical cluster
+            # occupancy weakly dominates higher occupancy: every concrete
+            # continuation is the same, while the target-capacity relaxation
+            # has at least as much slack.  Keep/reopen only the minimum-work
+            # representative.  This is exact dominance, not heuristic beam
+            # pruning.
+            fingerprint = (
+                state.fingerprint()
+                if future_work_dominance
+                else (state.fingerprint(), state.cluster_work_cc)
+            )
+            closed_work = closed_best_work.get(fingerprint)
+            if closed_work is not None and closed_work <= state.cluster_work_cc:
+                return False
+            previous = open_by_fingerprint.get(fingerprint)
+            if previous is not None and previous[0] <= state.cluster_work_cc:
+                return False
+            if previous is not None:
+                active_entries.discard(previous[1])
+            entry_id = next_entry_id
+            next_entry_id += 1
+            open_by_fingerprint[fingerprint] = (
+                state.cluster_work_cc,
+                entry_id,
+            )
+            active_entries.add(entry_id)
+            peak_open_states = max(peak_open_states, len(active_entries))
+            heapq.heappush(
+                rank_heap,
+                (
+                    target_rank(state),
+                    state.f_score,
+                    state.g_score,
+                    entry_id,
+                    state,
+                ),
+            )
+            return True
+
+        for initial in viable_initials:
+            push(initial)
+        invocation_start_expansions = expansions
+        termination = "open_exhausted"
+
+        while rank_heap:
+            while rank_heap and rank_heap[0][3] not in active_entries:
+                heapq.heappop(rank_heap)
+            if not rank_heap:
+                break
+            elapsed = time.perf_counter() - started
+            if time_limit_s is not None and elapsed >= time_limit_s:
+                termination = "time_limit"
+                break
+            if (
+                max_expansions is not None
+                and expansions - invocation_start_expansions >= max_expansions
+            ):
+                termination = "expansion_limit"
+                break
+
+            _rank, _lb, _g, entry_id, state = heapq.heappop(rank_heap)
+            active_entries.discard(entry_id)
+            fingerprint = (
+                state.fingerprint()
+                if future_work_dominance
+                else (state.fingerprint(), state.cluster_work_cc)
+            )
+            current_open = open_by_fingerprint.get(fingerprint)
+            if current_open is not None and current_open[1] == entry_id:
+                del open_by_fingerprint[fingerprint]
+            closed_work = closed_best_work.get(fingerprint)
+            if closed_work is not None and closed_work <= state.cluster_work_cc:
+                continue
+            closed_best_work[fingerprint] = state.cluster_work_cc
+            expansions += 1
+
+            # This path-occupancy budget is weaker than ``within_target`` but
+            # lets the cached generator discard profile variants before they
+            # enter OPEN.  The exact target test is repeated on every child.
+            work_budget = target_capacity - state.cluster_work_cc
+            generation_remaining = (
+                state.remaining
+                if candidate_window is None
+                else candidate_window_remaining(
+                    state.c2, state.c3, state.remaining, candidate_window
+                )
+            )
+            hidden_work = (
+                0
+                if candidate_window is None
+                else _minimum_cluster_work(state.remaining)
+                - _minimum_cluster_work(generation_remaining)
+            )
+            # Minimum cluster work is additive across experts.  Subtracting
+            # the unchanged hidden-window contribution from both budgets makes
+            # the generator's visible-subset work/capacity tests algebraically
+            # identical to evaluating the full remaining set.  The composite
+            # state LB is not additive, so its optional generator-side test is
+            # retained only for the unrestricted case; every child still runs
+            # the full exact ``within_target`` test below.
+            generator_bounds = {
+                "work_budget_cc": work_budget - hidden_work,
+                "capacity_limit_cc": target_capacity - hidden_work,
+                "makespan_limit_cc": (
+                    target_makespan
+                    if generator_bound_pruning and candidate_window is None
+                    else -1
+                ),
+            }
+            actions = gen_stage_actions(
+                state.c2,
+                state.c3,
+                generation_remaining,
+                **generator_bounds,
+            )
+            if self.enable_prefetch:
+                actions += gen_prefetch_actions(
+                    state.c2,
+                    state.c3,
+                    generation_remaining,
+                    **generator_bounds,
+                )
+            if candidate_window is not None:
+                visible_eids = candidate_window_visible_eids(
+                    state.c2, state.c3, state.remaining, candidate_window
+                )
+                actions = [
+                    action
+                    for action in actions
+                    if action_within_candidate_window(action, visible_eids)
+                ]
+            generated += len(actions)
+
+            for action in actions:
+                child = apply_action(state, action)
+                if not within_target(child):
+                    pruned_by_bound += 1
+                    continue
+                if not child.remaining:
+                    if child.g_score > target_makespan:
+                        raise AssertionError("target filter admitted late goal")
+                    return TargetFeasibilityResult(
+                        target_makespan=target_makespan,
+                        feasible=True,
+                        exhaustive=False,
+                        history=child.history,
+                        expansions=expansions,
+                        generated=generated,
+                        pruned_by_bound=pruned_by_bound,
+                        open_states=len(active_entries),
+                        closed_states=len(closed_best_work),
+                        peak_open_states=peak_open_states,
+                        runtime_s=(
+                            accumulated_runtime_s
+                            + time.perf_counter()
+                            - started
+                        ),
+                        termination="feasible",
+                    )
+                if not push(child):
+                    pruned_by_bound += 1
+
+        exhaustive = not active_entries
+        total_runtime_s = (
+            accumulated_runtime_s + time.perf_counter() - started
+        )
+        continuation = None
+        if not exhaustive:
+            live_heap = [
+                entry for entry in rank_heap if entry[3] in active_entries
+            ]
+            heapq.heapify(live_heap)
+            continuation = TargetFeasibilityCheckpoint(
+                target_makespan=target_makespan,
+                rank_mode=rank_mode,
+                candidate_window=candidate_window,
+                generator_bound_pruning=generator_bound_pruning,
+                future_work_dominance=future_work_dominance,
+                rank_heap=live_heap,
+                active_entries=set(active_entries),
+                open_by_fingerprint=dict(open_by_fingerprint),
+                closed_best_work=dict(closed_best_work),
+                next_entry_id=next_entry_id,
+                peak_open_states=peak_open_states,
+                expansions=expansions,
+                generated=generated,
+                pruned_by_bound=pruned_by_bound,
+                runtime_s=total_runtime_s,
+            )
+        return TargetFeasibilityResult(
+            target_makespan=target_makespan,
+            feasible=False,
+            exhaustive=exhaustive,
+            history=(),
+            expansions=expansions,
+            generated=generated,
+            pruned_by_bound=pruned_by_bound,
+            open_states=len(active_entries),
+            closed_states=len(closed_best_work),
+            peak_open_states=peak_open_states,
+            runtime_s=total_runtime_s,
+            termination=termination,
+            checkpoint=continuation,
+        )
+
 
 def clear_scheduler_caches() -> None:
     """Release per-case memoized states when worker processes are reused."""
@@ -3090,10 +3914,13 @@ def clear_scheduler_caches() -> None:
     enumerate_s2_down_prefetch_variants.cache_clear()
     enumerate_s2_down_prefetch_pair_variants.cache_clear()
     _best_concurrent_task_time.cache_clear()
+    _minimum_cluster_work.cache_clear()
     _isolated_task_time_lb.cache_clear()
     _token_execution_signature.cache_clear()
     _split_candidates.cache_clear()
     _phase_profile_choices.cache_clear()
+    _canonical_snap_pair_key.cache_clear()
+    _canonical_s2pf_base_pair_key.cache_clear()
     _gen_stage_actions_cached.cache_clear()
 
 

@@ -208,6 +208,42 @@ def parse_dev_task_map(header_path: str) -> Dict[int, DevTaskMapEntry]:
     return mapping
 
 
+def parse_nodes_from_header(
+    header_path: str,
+    descriptors: Optional[List[TaskDescriptor]] = None,
+    dev_map: Optional[Dict[int, DevTaskMapEntry]] = None,
+) -> Dict[int, DfgNode]:
+    """Recover node placement and kernel names from a generated Bingo header.
+
+    The generated dev-task map comments retain the final node location and
+    kernel even when ``final_dfg.csv`` is no longer present.
+    """
+    if descriptors is None:
+        descriptors = parse_task_descriptors(header_path)
+    if dev_map is None:
+        dev_map = parse_dev_task_map(header_path)
+
+    descriptor_map = {desc.node_id: desc for desc in descriptors}
+    comment_re = re.compile(
+        r"^Node_ID\d+_Chiplet([0-9A-Fa-f]+)_Cluster(\d+)_Core(\d+)_Kernel(.*)$"
+    )
+    nodes: Dict[int, DfgNode] = {}
+    for node_id, entry in dev_map.items():
+        descriptor = descriptor_map.get(node_id)
+        match = comment_re.match(entry.comment)
+        if descriptor is None or match is None:
+            continue
+        nodes[node_id] = DfgNode(
+            node_id=node_id,
+            chiplet=match.group(1),
+            cluster=int(match.group(2)),
+            core=int(match.group(3)),
+            node_type="normal" if descriptor.desc_type == 0 else "dummy",
+            kernel=match.group(4),
+        )
+    return nodes
+
+
 def node_is_device_kernel(node: DfgNode) -> bool:
     return node.kernel.startswith("__snax_")
 

@@ -10,6 +10,8 @@ features for later range-based policy analysis.
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import math
 import random
@@ -54,6 +56,14 @@ CONSTRUCTIONS = (
     "zipf",
     "boundary_mix",
 )
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def compute_only_ideal_cc(assignment_total: int) -> int:
@@ -404,7 +414,9 @@ def assign_dataset_splits(cases: list[dict], rng: random.Random) -> None:
         counts[destination] += 1
 
 
-def generate_cases(e_total: int, rng: random.Random) -> list[dict]:
+def generate_cases(
+    e_total: int, rng: random.Random, split_label: str | None = None
+) -> list[dict]:
     cases: list[dict] = []
     seen = set()
     construction_counts = Counter()
@@ -519,7 +531,11 @@ def generate_cases(e_total: int, rng: random.Random) -> list[dict]:
             "stratified_constrained_random",
         )
 
-    assign_dataset_splits(cases, rng)
+    if split_label is None:
+        assign_dataset_splits(cases, rng)
+    else:
+        for case in cases:
+            case["dataset_split"] = split_label
     rng.shuffle(cases)
     for case_id, case in enumerate(cases):
         case["case_id"] = case_id
@@ -598,31 +614,81 @@ def validate_cases(cases: list[dict], e_total: int) -> None:
         signatures.add(signature)
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seed", type=int, default=SEED)
+    parser.add_argument("--cases-per-e", type=int, default=N_CASES_PER_E)
+    parser.add_argument(
+        "--directed-cases-per-e", type=int, default=DIRECTED_CASES_PER_E
+    )
+    parser.add_argument("--corner-cases-per-e", type=int, default=CORNER_CASES_PER_E)
+    parser.add_argument("--e-total", nargs="+", type=int, default=list(TOTAL_EXPERTS))
+    parser.add_argument("--out-dir", type=Path, default=OUT_DIR)
+    parser.add_argument("--prefix", default="scheduler_strategy_coverage")
+    parser.add_argument(
+        "--split-label",
+        help="override generated discovery/validation/blind labels after balancing",
+    )
+    parser.add_argument(
+        "--policy-freeze-manifest",
+        type=Path,
+        help="bind generated inputs to an already frozen policy manifest",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
+    global SEED, N_CASES_PER_E, DIRECTED_CASES_PER_E, CORNER_CASES_PER_E
+    SEED = args.seed
+    N_CASES_PER_E = args.cases_per_e
+    DIRECTED_CASES_PER_E = args.directed_cases_per_e
+    CORNER_CASES_PER_E = args.corner_cases_per_e
+    if N_CASES_PER_E <= 0:
+        raise ValueError("--cases-per-e must be positive")
+    if not 0 <= CORNER_CASES_PER_E <= DIRECTED_CASES_PER_E <= N_CASES_PER_E:
+        raise ValueError("require corner <= directed <= total cases per E")
+    out_dir = args.out_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    freeze_binding = None
+    if args.policy_freeze_manifest is not None:
+        if not args.policy_freeze_manifest.is_file():
+            raise FileNotFoundError(args.policy_freeze_manifest)
+        freeze_binding = {
+            "path": str(args.policy_freeze_manifest.resolve()),
+            "sha256": file_sha256(args.policy_freeze_manifest),
+        }
     root_rng = random.Random(SEED)
     manifest = {
-        "name": "scheduler_strategy_coverage",
+        "name": args.prefix,
         "seed": SEED,
         "topk": TOPK,
         "n_cases_per_e": N_CASES_PER_E,
+        "directed_cases_per_e": DIRECTED_CASES_PER_E,
+        "corner_cases_per_e": CORNER_CASES_PER_E,
+        "e_total": list(args.e_total),
+        "split_label": args.split_label,
+        "policy_freeze": freeze_binding,
         "purpose": (
             "Feature-stratified strategy discovery and validation. This suite is "
             "coverage-balanced and must not be interpreted as a measured router "
             "probability distribution."
         ),
         "files": [],
+        "file_sha256": {},
     }
-    for e_total in TOTAL_EXPERTS:
+    for e_total in args.e_total:
         rng = random.Random(root_rng.randrange(1 << 60))
-        cases = generate_cases(e_total, rng)
+        cases = generate_cases(e_total, rng, args.split_label)
         validate_cases(cases, e_total)
         payload = {
             "meta": {
-                "name": f"scheduler_strategy_coverage_E{e_total}",
+                "name": f"{args.prefix}_E{e_total}",
                 "seed": SEED,
                 "e_total": e_total,
                 "topk": TOPK,
                 "max_m_total": MAX_M_TOTAL,
+                "policy_freeze": freeze_binding,
                 "description": (
                     "Directed timing/cache boundaries plus de-duplicated, "
                     "feature-stratified constrained-random top-2 distributions."
@@ -634,10 +700,11 @@ def main() -> None:
             },
             "cases": cases,
         }
-        out_path = OUT_DIR / f"scheduler_strategy_coverage_E{e_total}.json"
+        out_path = out_dir / f"{args.prefix}_E{e_total}.json"
         with out_path.open("w") as handle:
             json.dump(payload, handle, indent=2)
         manifest["files"].append(out_path.name)
+        manifest["file_sha256"][out_path.name] = file_sha256(out_path)
         print(f"wrote {out_path.name}")
         print(json.dumps({
             "analysis_eligible": payload["meta"]["analysis_eligible_cases"],
@@ -646,7 +713,7 @@ def main() -> None:
             "cache_regimes": payload["meta"]["cache_regime_counts"],
         }, indent=2))
 
-    manifest_path = OUT_DIR / "scheduler_strategy_coverage_manifest.json"
+    manifest_path = out_dir / f"{args.prefix}_manifest.json"
     with manifest_path.open("w") as handle:
         json.dump(manifest, handle, indent=2)
     print(f"wrote {manifest_path.name}")

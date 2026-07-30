@@ -1,21 +1,345 @@
-# RTL Scheduler Policy Derivation Contract
+# RTL Scheduler Policy Re-derivation Contract
 
-Status: the R4+bottom2/LPT policy is a frozen evaluated baseline.  Active P5
-development replaces its software-visible tail selectors with an R8/K32
-ordered window and trains a new RTL-oriented future-value ranker.  P5 is not
-an RTL implementation target until its validation and fresh-blind gates pass.
+## Controlling HW-v2 decision (2026-07-20)
 
-## Active P5: R8/K32 future-value ranker
+This section supersedes the older R4+bottom2/K32 and staged derivation text
+retained below as experiment history.  The deployable algorithmic target is
+now `scheduler_hw_fixed_policy.py::hw_v2_schedule`; RTL implementation has not
+yet started.
+
+The runtime boundary is one scheduling round per invocation.  HW-v2 never
+runs beam search, generates a child action, or unfolds the remaining batch.
+It keeps the deployed fixed candidate bank and adds only one alternative shape
+profile at each existing `ONE_IDLE` release point:
+
+- `ntok >= 7`: `A/B`;
+- `3 <= ntok < 7`: `B/B`;
+- `ntok <= 2`: `C/C`.
+
+Thus `BOTH_IDLE` remains bounded by five candidates, `ONE_IDLE` increases from
+at most three to at most six, and the final one-expert round retains its fixed
+candidate IDs.  No standalone prefetch, arbitrary-rank candidate, resident
+expert candidate, or variable candidate budget is added.  Resident candidates
+were rejected because their additional full-30K gain over the shape-only
+policy was only 0.032 percentage points while requiring software-visible
+maintenance of experts outside the ordered head window.
+
+The selected continuation score is
+
+```text
+min(aggregate_greedy, LPT_top4_then_balance_aggregate_tail)
+```
+
+For LPT, the first four remaining experts are placed in descending order onto
+the currently earlier cluster using `best_task(ntok)`.  Work after those four
+experts is represented only by a scalar total and balanced between the two
+loads.  `remaining <= 2` uses the aggregate greedy expression.  There is no
+SIM1 continuation expansion.  The final expert is still executed through the
+ordinary fixed-candidate pipeline when it becomes the current round; this is
+not a nested lookahead.
+
+An RTL implementation needs a six-entry ordered head window so every possible
+removal of up to two among the leading four still exposes the next four items
+to the scorer, plus scalar `total_task` and existing aggregate state.  A second
+six-entry refill buffer is permitted.  HW compacts its own window using the
+winning remove mask and requests only the consumed count from software;
+software streams the next unseen sorted descriptors and does not mirror the
+window identities.  No bottom-side cursor is required.
+
+The frozen 29,928-case comparison is
+`results/policy_search/scheduler_hw_v2_30k_comparison.json`:
+
+- aggregate makespan versus deployed HW: -1.014485%;
+- wins/ties/losses versus deployed HW: 9,206 / 19,170 / 1,552;
+- on 23,589 proven-optimal cases, deployed-HW gap: 1.447406%;
+- on the same proven cases, HW-v2 gap: 0.690060%;
+- exact proven cases: 17,500 for HW-v2 versus 13,575 for deployed HW.
+
+The failure attribution uses a 132-case stratified candidate-oracle audit.  On
+the 100 cases for which no beam state was pruned, the residual over the proven
+four-stage optimum is split exactly into 32.18% candidate-space loss and
+67.82% scorer/control loss.  Therefore the remaining limitation is primarily
+the score, not candidate coverage, but the tested shift/add release-gap,
+S4-prefetch reward, short-tail guard, and old-SIM1 variants all degraded the
+full closed-loop objective.  They are rejected rather than added after the
+fact.
+
+A subsequent fixed-candidate scorer audit explicitly excluded one-round
+lookahead and tested two additional families on all 29,928 cases.  The evidence
+is `results/policy_search/scheduler_hw_scorer_non_lpt_full.json`.
+
+- A maximum of release-aware workload, largest-expert critical-chain and
+  mandatory-DMA-capacity lower bounds regressed aggregate makespan by 2.32% to
+  2.41% versus deployed HW.  The relaxed estimates did not exceed the reference
+  makespan at any of the 23,589 proven-optimal initial states, but they are too
+  insensitive to candidate-specific ordering to serve as the candidate score.
+- A cache-aware list estimate for the first four remaining experts, combined
+  with `aggregate_greedy` by `min`, improved aggregate makespan by 0.0320
+  percentage points over the selected LPT scorer.  Adding committed-DMA
+  conflict checks raised that improvement to 0.0356 points.  The latter reduced
+  the proven-reference gap from 0.690060% to 0.644945% and increased exact
+  proven cases from 17,500 to 17,964.
+- The cache-aware estimate requires up to 72 shape/lane finish evaluations per
+  candidate for four visible experts; the DMA-aware form additionally scans
+  committed transfer intervals.  This is substantially more control and
+  arithmetic than four LPT placements for only a 0.0356-point aggregate gain.
+  Therefore both are recorded as diagnostic upper-complexity alternatives and
+  are not selected for RTL.  The controlling score remains
+  `min(aggregate_greedy, LPT_top4_then_balance_aggregate_tail)`.
+
+Historical status snapshot (superseded by the controlling decision above):
+the bounded generator, physical
+scorer, constants and numeric tie-break were frozen under the confirmed
+slave-only interface before blind-v2 generation.  Canonical validation and
+the fresh blind-v2 gate both passed without any post-blind policy change.  The
+next task is the bounded RTL microarchitecture and C-golden equivalence, not
+another scheduler search.  Historical P5 evidence is retained below, but its
+full-descriptor/full-LPT implementation is not deployable under the current
+storage and software-interface constraints.
+
+## Historical bounded-window derivation plan
+
+This section records the earlier plan and is not controlling after the
+2026-07-20 HW-v2 decision above.
+
+### Fixed runtime boundary
+
+- One invocation selects exactly one scheduling action.  RTL never expands a
+  complete batch and never runs offline beam search.
+- The scheduler is a slave.  It cannot fetch descriptors or initiate a refill.
+- RTL may hold an active `top4 + bottom2` window and one equally partitioned
+  refill buffer: at most eight head-side and four tail-side descriptors, or
+  twelve descriptors total.  It may also maintain scalar aggregates.
+- Software supplies the initially sorted descriptor stream and refills the two
+  monotone sides.  Hardware reports separate head-side and tail-side consume
+  counts, so software advances two indices; it does not mirror every internal
+  window identity after each decision.
+- The score may inspect the exact current C2/C3/DMA/cache/prefetch snapshots,
+  the visible descriptors, `remaining_count`, and an incrementally maintained
+  `total_remaining_work`.  It may not inspect an unseen middle descriptor
+  individually.
+- Candidate actions still use the exact four-stage child transition.  Any
+  approximate reasoning begins only after that exact child has been formed.
+
+### Predeclared candidate alternatives
+
+The deployment comparison is between complete `(generator, scorer)` pairs:
+
+1. `R4`: leading four remaining experts plus concrete named
+   residency/prefetch identities;
+2. `R4+B2`: the same pool plus the trailing two remaining experts.
+
+Both use the existing bounded physical-action templates and `K <= 32`.
+Candidate coverage is reported separately from scorer loss.  Prior reference
+coverage motivates testing `B2`, but does not predetermine that it is worth the
+extra two-sided refill interface.
+
+### Predeclared scorer alternatives
+
+All score arithmetic is integer half-quantum arithmetic (`Hq = 5,632` cycles).
+For every candidate, first apply the exact four-stage transition and then
+evaluate one of these fixed alternatives:
+
+- `S0 aggregate`: reproduce the current hardware-oriented aggregate estimate
+  from the two child release times, total remaining work, and largest visible
+  work item.  This is the control baseline.
+- `S1 ordered-middle`: place the visible head descriptors by two-bin LPT,
+  balance the unseen middle only through its total-work aggregate, then place
+  the visible bottom descriptors by LPT.  This preserves the known descending
+  order without pretending the unseen middle is individually stored.
+- `S2 monotone one-round lookahead`: for each current candidate, form at most
+  one legal next-round physical representative from each action family
+  `SINGLE/PAIR/SPLIT/PREFETCH`, apply each exact transition, and use
+  `max(S1(current_child), min S1(next_child))`.  Thus at most four next
+  children, not a future tree, are evaluated per current candidate.  The
+  monotone envelope is mandatory: the lookahead may expose and penalize an S1
+  underestimate, but may not lower the current S1 score and repeatedly defer a
+  large expert beyond the finite horizon.
+
+Each scorer is evaluated both without pathmax and with only the mandatory-DMA
+capacity pathmax.  This creates exactly six baseline combinations:
+
+```text
+S0, S0+DMA, S1, S1+DMA, S2, S2+DMA
+```
+
+No fitted residual, decision tree, LUT, or depth correction is eligible until
+these six physical baselines have been compared.  If a correction is later
+needed, it must use only the fixed runtime features above, have depth at most
+three, and have output clamped to `[-2*Tq, +2*Tq]`.
+
+### Evaluation objective and gates
+
+For a state `s` and generated candidate `a`, the offline label is the best
+forced continuation value `Q(s,a)`.  The primary statewise diagnostic is
+candidate-selection regret:
+
+```text
+Q(s, selected_by_score) - min_a Q(s,a)
+```
+
+Absolute-score MSE is not a selection objective.  A scorer is accepted only
+after both of the following are reported:
+
+- statewise candidate ranking: zero-regret rate, mean/p95/max regret and first
+  error by action family and remaining-count band;
+- complete round-by-round rollout: exact cases, mean/p95/max makespan ratio,
+  paired wins/losses, candidate count and decision count.
+
+The final choice between `R4` and `R4+B2` is made with the selected scorer in
+closed loop.  A generator is not accepted from reference-history coverage
+alone, and a scorer is not accepted from isolated-state fitting alone.
+
+### Locked execution order
+
+1. Freeze and unit-check the bounded runtime feature contract.
+2. Implement `S0/S1/S2` and their DMA-pathmax variants in the existing
+   derivation script; do not create another parallel pipeline.
+3. Reconstruct the existing complete R4+bottom2 counterfactual groups and use
+   them for an initial ranking audit.
+4. If coverage is insufficient, generate one stratified counterfactual dataset
+   for the final candidate alternatives, with case-level fit/calibration
+   separation and resumable entry IDs.
+5. Compare all six scorers statewise, then run paired closed-loop `R4` versus
+   `R4+B2` validation with the best physical scorer.
+6. Only if the physical scorer misses the predeclared gate, fit the bounded
+   correction and repeat the same closed-loop comparison.
+7. Freeze generator, scorer, constants and numeric tie-break; then generate a
+   fresh blind-v2 set exactly once.  RTL work begins only after that result.
+
+Any command estimated to exceed 30 minutes is handed to the user as a complete
+background command with an explicit log, result path, PID/status check and
+resume behavior.  Short checks and implementation tests are run directly.
+
+### Execution status (2026-07-18)
+
+Steps 1--4 are complete.  The single bounded v1 dataset contains 384 mixed
+reference, R4/S2+DMA and R4+bottom2/S2+DMA states and 13,687 unique physical
+candidates.  On all 105 states whose complete R4/R4+bottom2 union was proven,
+both generators had zero exact candidate loss.  This separates the remaining
+error from candidate coverage: it is scorer or receding-horizon error.
+
+The first non-monotone S2 repeatedly postponed a large expert.  It was rejected
+and replaced by the predeclared monotone envelope.  With the canonical
+`rem-snap-action` tie, R4+bottom2/S2+DMA has 99/108 zero-regret fully proven
+states, 2,294.52-cycle mean exact regret and 22,528-cycle p95 exact regret.
+Among the six fixed physical scorers it has the best fully proven mean regret.
+
+Complete 4,739-case validation with the former candidate-index tie gave:
+
+| Policy | Exact | Mean ratio | p95 ratio | Mean regret | p95 regret |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| R4/S1+DMA | 4,046 | 1.017019 | 1.060606 | 17,379.69 cc | 67,584 cc |
+| R4/S2+DMA | 4,135 | 1.009942 | 1.040000 | 13,543.42 cc | 45,056 cc |
+| R4+B2/S2+DMA | 4,158 | 1.008698 | 1.037037 | 11,710.85 cc | 33,792 cc |
+
+S2 versus S1 was better on 331 cases and worse on 45, reducing mean makespan
+by 3,836.27 cycles/case.  Adding bottom2 under S2 was better on 98 cases and
+worse on 79, reducing mean makespan by 1,832.57 cycles/case and increasing
+exact cases by 23.  These closed-loop results confirm the previously locked
+`R4 + bottom2 + concrete residency, K32` generator under the bounded scorer.
+
+The final tie no longer uses a generator-dependent candidate index.  A
+fixed-width direct-v9 physical-action key had zero identity collisions on all
+384 dataset states.  On a paired 180-case validation pilot, replacing the
+index with this key while retaining `remaining -> snap` produced 163 exact
+cases versus 160, was better on nine cases and worse on one, and reduced total
+makespan by 1,869,824 cycles.
+
+A Q-directed `snap -> remaining` alternative improved isolated proven-state
+ranking but failed closed loop: only 107/180 exact cases, 66 regressions versus
+two improvements, and 52,918,272 additional cycles relative to
+`remaining -> snap`.  It is rejected.  This also rejects a PREFETCH-favoring
+tie or fitted correction based only on isolated-state Q.  No residual model,
+decision tree or LUT is selected.
+
+The complete canonical-key validation subsequently finished all 4,739 proven
+validation cases:
+
+| Group | Cases | Exact | Mean ratio | p95 ratio | Mean regret | p95 regret |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| E8 | 1,912 | 1,711 | 1.004669 | 1.020408 | 5,307.98 cc | 33,792 cc |
+| E32 | 1,541 | 1,388 | 1.006986 | 1.023810 | 7,536.13 cc | 33,792 cc |
+| E64 | 1,286 | 1,133 | 1.011263 | 1.041667 | 17,404.02 cc | 33,792 cc |
+| Overall | 4,739 | 4,232 | 1.007212 | 1.025000 | 9,314.96 cc | 33,792 cc |
+
+Relative to the former candidate-index tie on identical cases, the canonical
+tie was better on 160 cases, worse on 48 and identical on 4,531.  It added 74
+exact cases and reduced total makespan by 11,354,112 cycles.  Every E group
+improved in mean makespan.  Relative to the historical P5 R8/full-LPT point,
+it added 104 exact cases and improved overall mean ratio from 1.013338 to
+1.007212 and p95 from 1.040816 to 1.025000.
+
+An independent implementation in `scheduler_policy_golden.py` reproduced the
+complete action history, history SHA-256, makespan, decision count and maximum
+candidate count on five high-risk E8/E32/E64 cases, including the largest
+paired improvements and regressions.  The frozen validation report is
+`results/policy_search/bounded_r4_b2_s2_dma_canonical_validation_v1.json`,
+SHA-256
+`cc573c077763842d7095ff720fd13a763915bb6df2a164ceb5bd8ba7b6a040c0`.
+
+The frozen policy is therefore R4+bottom2/K32 with monotone S2,
+mandatory-DMA pathmax and the canonical `score-rem-snap-action` key.  No
+formula, template, constant, tie-break or fitted model may change after the
+fresh blind-v2 inputs are generated.  Only that blind evaluation remains.
+The source and constant freeze manifest is
+`results/policy_search/bounded_policy_freeze_v1.json`, SHA-256
+`45771ae84f84edc90683556f1fc9d50681efac6b4cbba2c5ce0613b71460c93f`.
+
+### Blind-v2 final decision (complete, 2026-07-19)
+
+Blind-v2 was generated once from the frozen manifest with seed 20260718.  It
+contains 976 analysis-eligible cases for each of E8, E32 and E64, or 2,928 in
+total.  The independent golden model completed every case with the frozen
+policy ID and no illegal history.
+
+The reference used a 60-second/K16 first pass followed only on the 343
+high-gap cases by termination-aware refinement.  Expansion-limited cases used
+K256/180 seconds; time-limited cases retained K16 and used 180 seconds.  Final
+certificates merge all passes with `UB = min(UB_i)` and `LB = max(LB_i)`.
+Every merged result passed `LB <= UB`, gap recomputation and history-source
+checks.  Refinement improved 20 upper bounds by 596,992 cycles in total,
+strengthened nine lower bounds and added 19 optimality proofs.
+
+Final reference quality and frozen-policy results are:
+
+| Evidence set | Cases | Policy exact/equal-UB | Mean ratio | p95 ratio | Max ratio |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Proven optimum | 2,395 | 2,369 | 1.002485 | 1.000000 | 1.625000 |
+| Certified within 3% | 2,605 | 2,578 | 1.002305 vs UB | 1.000000 vs UB | 1.625000 vs UB |
+| All best-known UB | 2,928 | 2,900 | 1.002057 | 1.000000 | 1.625000 |
+
+On the certified-within-3% set, the policy-to-LB certified upper ratio has
+mean 1.003490 and p95 1.013468.  Of the 323 cases whose reference gap remains
+above 3%, 322 use exactly the same makespan as the best reference UB.  These
+323 rows remain bounded evidence and are not called optimal.  Their loose
+certificates are dominated by reference lower-bound/search difficulty; they
+do not justify changing a policy after opening blind-v2.
+
+The frozen policy therefore passes the blind gate and is accepted as the RTL
+target.  The canonical summary is
+`results/blind_v2/final_evaluation_summary.json`, SHA-256
+`0651733726d4c119d50eab5044fb3241a4ded6dcdd5e5f669fd784c5152467b3`.
+The row-level comparison is
+`results/blind_v2/frozen_policy_vs_reference_final.json`, SHA-256
+`e6445b247a23c909026577af24c5fc449856295666772f962d6e80db9f62a192`.
+
+## Historical P5: R8/K32 full-descriptor experiment
+
+The following P5 section is retained as experimental evidence.  Its E64 local
+descriptor store and full-list LPT scan violate the active bounded-window
+runtime boundary and must not be treated as the current RTL target.
 
 ### Fixed architecture boundary
 
 - Candidate experts are the ordered top eight remaining entries plus concrete
   named residency/prefetch identities; no bottom selector is maintained.
-- Every decision still emits at most 32 direct-v8 candidates and applies the
+- Every decision still emits at most 32 direct-v9 candidates and applies the
   exact four-stage child transition before scoring.
-- RTL owns the eight-entry window and compaction.  CVA6 owns the sorted L3
-  stream and advances only a refill cursor; software does not mirror the RTL
-  window or decide whether a refill is a top or bottom entry.
+- CVA6 writes the sorted descriptor list once at batch initialization.  RTL
+  owns its valid mask, extracts the first eight valid ranks for candidate
+  generation and scans all valid entries for full-LPT.  There is no per-round
+  software refill, bottom selector or mirrored hardware window.
 - The old R4+bottom2 report and golden model remain immutable comparison
   evidence.  Their opened blind partition is not reused as an unbiased P5
   test.
@@ -36,13 +360,25 @@ their greedy R8 rollouts lost 1.37M--1.91M cycles.  The dominant open problem
 is therefore multi-round scorer error; pure-R8 structural loss remains bounded
 evidence rather than being assumed zero.
 
-### Runtime score family
+### Runtime score alternatives
 
-P5 does not scan the complete E64 remaining list.  Its persistent scheduling
-summary is limited to top8 plus incrementally maintained remaining count,
-total isolated compute blocks, odd-token count and small-expert count.  The
-base uses the two absolute cluster release times, total remaining work, top0
-work and pathmax:
+Candidate generation is frozen.  The remaining architecture decision is the
+amount of distribution state used by the future estimate:
+
+- `window-LPT`: run two-bin integer LPT over the current top8 and concrete
+  named residency entries, then add the unseen tail through its incrementally
+  maintained total-work aggregate;
+- `full-LPT`: store every remaining descriptor locally and run the same LPT
+  update over all remaining experts for every candidate.
+
+`window-LPT` requires only the ordered top8 window, refill cursor, remaining
+count and total remaining isolated work.  `full-LPT` removes the tail
+approximation but needs up to E64 descriptors and up to `K32 * E64` entry
+visits per decision.  Both use the exact four-stage child transition before
+the future estimate.  There are no learned coefficients in either deployable
+alternative.
+
+The rejected aggregate base was:
 
 ```text
 average      = ceil((load2 + load3 + remaining_work) / 2)
@@ -52,18 +388,10 @@ score        = 16 * rtl_base + sum(weight[mode,term] * term)
 ```
 
 Timing uses a 5,632-cycle unit because legal DMA/pathmax boundaries may be
-half of the 11,264-cycle compute quantum.  Coefficients are restricted to
-`{-16,-8,-4,-2,-1,0,1,2,4,8,16}` so every product is a sign, shift or bypass.
-The only coefficient-bank selector is the existing decision mode
-`BOTH_IDLE`, `ONE_IDLE` or `LAST_EXPERT`.
+half of the 11,264-cycle compute quantum.  The aggregate base and its
+mode-selected shift/add corrections remain diagnostic experiments only.
 
-Predeclared correction terms cover release/load imbalance, outstanding DMA
-tail, pathmax gap, useful and duplicate named residency work, odd/small expert
-counts, selected top8 ranks and action-family flags.  Calibration may select
-only among the already declared `rtl-base`, `rtl-timing`,
-`rtl-timing-cache` and `rtl-full` profiles; it may not invent features.
-
-### Counterfactual data and objective
+### Counterfactual diagnostic data
 
 The formal v1 dataset contains 1,024 discovery states: 512 deterministic
 reference-path states and 512 R8/LPT on-policy states, stratified across
@@ -79,20 +407,86 @@ with certified regret (`selected_lower > best_upper`) taking priority over
 feasible upper-bound regret.  It does not regress absolute makespan and does
 not treat a loose interval midpoint as truth.
 
+This objective improved held-out single-state ranking but did not predict
+closed-loop behavior.  On the fixed 180-case validation pilot,
+`full-LPT-base` achieved 160 exact cases, mean ratio 1.015466 and p95 1.028571;
+adding the fitted timing correction fell to 97 exact cases, mean 1.048476 and
+p95 1.375.  The selected aggregate correction had already fallen to 100 exact
+cases.  Consequently no fitted residual is eligible for P5 deployment.  The
+Q dataset is retained to explain candidate-level errors, not to override
+end-to-end rollout selection.
+
 ### P5 acceptance gates
 
-- exactly one complete K32 group per sampled state; deterministic resume and
-  no duplicate entry IDs;
+- exactly one complete, consecutively indexed group of at most K32 candidates
+  per sampled state; deterministic resume and no duplicate entry IDs;
 - no candidate continuation undercuts a proven root reference;
-- calibration chooses only a predeclared profile and mode coefficient banks;
-- full validation mean ratio at most 1.012534, p95 at most 1.042375 and at
-  least 4,057 exact cases, retaining at least 90% of the R4 baseline gain over
-  current hardware;
-- validation must also improve the untrained R8 `rtl-base` and report paired
-  results against both R8/LPT and frozen R4+bottom2/LPT;
+- full validation reports paired results for `window-LPT`, `full-LPT`, and the
+  frozen R4+bottom2/LPT baseline on identical cases;
+- prefer `window-LPT` only if, relative to `full-LPT`, its paired mean
+  makespan increase is at most 5,632 cycles/case, p95 ratio increases by at
+  most 0.005, and exact count decreases by at most 1% of evaluated cases;
+- otherwise select `full-LPT`; fitted residual profiles are ineligible even if
+  their single-state calibration objective is better;
 - after implementation and constants are frozen, generate and solve a fresh
   independent blind-v2 distribution.  The previously opened blind split is
   diagnostic only for P5.
+
+### P5 validation decision (complete, 2026-07-17)
+
+Both alternatives completed the same 4,739 proven validation cases.  Paired
+results were 4,665 identical schedules, 74 cases favoring full-LPT and zero
+favoring window-LPT.  Window-LPT increased mean makespan by 549.06 cycles per
+case; overall p95 ratio remained 1.040816 and its maximum paired increase was
+67,584 cycles.  It therefore passed the mean and p95 simplification limits.
+
+Window-LPT produced 4,052 exact cases versus 4,125 for full-LPT, a loss of 73
+or 1.54% of the evaluated set.  This exceeds the predeclared maximum loss of
+1% (47 cases).  P5 therefore selects `full-LPT` exactly as required by the
+gate.  The frozen deployment point is `R8 + concrete residency`, `K32`, exact
+four-stage child transition, full-list integer LPT and `rem-snap` tie-break.
+No fitted coefficient bank is part of the selected algorithm.
+
+### P5 pathmax reduction
+
+RTL mapping exposed that the original full-LPT score also inherited the
+reference search `f_score`.  A controlled 180-case ablation separated its
+compute, release-chain, critical-chain and mandatory-DMA components.  Removing
+all pathmax terms reduced exact cases from 160 to 153 and worsened p95 from
+1.028571 to 1.111111, so pathmax cannot be silently dropped.  The three
+compute/chain components produced exactly the same histories as no pathmax;
+DMA capacity alone reproduced the complete `f_score` policy with zero
+makespan or history-hash mismatches.
+
+The deployable P5 score is therefore full-list LPT plus one inherited
+mandatory-DMA-capacity pathmax.  Its independent golden implementation counts
+8 `Hq` lane units for every uncovered S1 transfer and 4 for every uncovered
+S3 transfer, then sweeps the committed two-lane DMA endpoints.  Full validation
+produced zero summary, makespan, decision-count or history-hash mismatches
+against the already recorded full-`f_score` report across all 4,739 cases.
+The reduction is therefore frozen.
+
+### P5 RTL-order correction
+
+RTL mapping found that direct-v8 used Python `repr(action_key)` as the last
+local-action tie-break.  That compares decimal integers as strings and is not a
+valid hardware contract.  Direct-v9 replaces only this last tie-break with the
+same fields in fixed-width numeric order.  The archived direct-v8 path remains
+available for exact reproduction of prior reports.
+
+On a paired 180-case validation pilot, direct-v9 changed one action history and
+zero final makespans; there were no better or worse cases.  The subsequent
+complete 4,739-case independent DMA-pathmax run changed 17 histories and four
+makespans relative to direct-v8.  All four changes were improvements, none were
+regressions, and the maximum improvement was 33,792 cycles.  Direct-v9 reached
+4,128 exact cases, mean ratio 1.013338 and p95 1.040816, versus 4,125 exact and
+mean 1.013365 for direct-v8.  The numeric ordering is therefore frozen.  This
+correction does not reopen R8, K32, full-LPT, the family quotas or the
+DMA-pathmax equation.
+
+The frozen report is
+`results/policy_search/r8_p5_v9_dma_pathmax_validation_full.json`, SHA-256
+`14f1756dd59d3ef82933e61afd3fa9f801db949e066868d3ef7a77d0db11c5b4`.
 
 ## Frozen v1 deliverable and evidence (historical baseline)
 
@@ -192,35 +586,41 @@ Template selection uses, in order:
 
 Frequency alone may not delete a rare template with material oracle value.
 
-## Frozen future-cost contract
+## Frozen bounded future-cost contract
 
-Every candidate first receives the exact one-round four-stage transition. For
-the resulting child, initialize two LPT loads with its absolute `c2.task_end`
-and `c3.task_end`. Scan remaining experts in descending token rank order. The
-isolated duration of an expert with `n` tokens is:
+Every current candidate first receives the exact four-stage transition.  S1
+starts two integer `Hq` loads from the child C2/C3 task endpoints, places the
+visible head descriptors by LPT, balances the unseen middle through only its
+aggregate work, and then places the visible bottom descriptors by LPT.
 
-```text
-blocks   = (n + 1) >> 1
-duration = 3 * 11,264 * blocks
-```
-
-Add each duration to the currently smaller load; equal loads choose C2. The
-primary score is:
+For monotone S2, generate at most one next physical representative from each
+of `SINGLE`, `PAIR`, `SPLIT` and `PREFETCH`, using only descriptors visible in
+the current invocation.  Apply each exact transition and compute:
 
 ```text
-score = max(child.f_score, lpt_load_c2, lpt_load_c3)
+pm_child   = max(pm_parent, dma_capacity_bound(child))
+current    = max(S1(parent, child), pm_child)
+next_best  = min(max(S1(parent, grandchild), pm_grandchild))
+score_q    = max(current, next_best)
 ```
+
+If there is no legal next representative, `score_q = current`.  The pathmax
+register contains only the mandatory-DMA capacity bound.  No hidden refill,
+unseen-middle descriptor scan, fitted coefficient, tree, LUT, general
+multiplier or divider is used.
 
 Candidates are compared lexicographically by:
 
 ```text
-(score, child.remaining_count,
- max(child.c2.task_end, child.c3.task_end), candidate_index)
+(score_q,
+ child.remaining_count,
+ max(child.c2.task_end, child.c3.task_end),
+ rtl_action_order_key(action))
 ```
 
-The duration multiplication is a shift-add by three in units of 11,264 cycles.
-No fitted features, coefficient banks, multiplier, divider, beam search or
-future child expansion are present in the frozen runtime scorer.
+The final action key is the direct-v9 fixed-width numeric encoding of the
+physical action fields.  Candidate slot index remains report metadata and does
+not affect selection.
 
 ## Acceptance gates
 

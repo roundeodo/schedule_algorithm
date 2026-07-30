@@ -292,9 +292,31 @@ def parse_trace_tid_location(tid, base_hart_id=1, cores_per_cluster=2):
 
 def load_static_mapping(workload_dir):
     """Load generated DFG/header data used to infer node labels for trace tasks."""
-    nodes, descriptors, dev_map = verify_deps.load_artifacts(workload_dir)
-    errors, warnings = verify_deps.validate_artifacts(nodes, descriptors, dev_map)
+    csv_path, header_path = verify_deps.default_paths(workload_dir)
+    if os.path.exists(csv_path):
+        nodes, descriptors, dev_map = verify_deps.load_artifacts(workload_dir)
+        errors, warnings = verify_deps.validate_artifacts(nodes, descriptors, dev_map)
+        mapping_source = "final_dfg.csv + offload_bingo_hw.h"
+    else:
+        descriptors = verify_deps.parse_task_descriptors(header_path)
+        dev_map = verify_deps.parse_dev_task_map(header_path)
+        nodes = verify_deps.parse_nodes_from_header(
+            header_path, descriptors=descriptors, dev_map=dev_map
+        )
+        errors = []
+        warnings = [
+            "final_dfg.csv is absent; node labels recovered from offload_bingo_hw.h"
+        ]
+        mapping_source = "offload_bingo_hw.h (header-only fallback)"
     streams = verify_deps.build_expected_device_streams(nodes, descriptors, dev_map)
+    for descriptor in sorted(descriptors, key=lambda item: item.index):
+        node = nodes.get(descriptor.node_id)
+        if (
+            node is not None
+            and node.node_type == "normal"
+            and verify_deps.node_is_host_kernel(node)
+        ):
+            streams.setdefault((node.cluster, node.core), []).append(node)
     return {
         "nodes": nodes,
         "descriptors": descriptors,
@@ -303,6 +325,7 @@ def load_static_mapping(workload_dir):
         "errors": errors,
         "warnings": warnings,
         "workload_dir": workload_dir,
+        "mapping_source": mapping_source,
     }
 
 
@@ -317,10 +340,13 @@ def annotate_tasks_with_static_nodes(
     """
     if static_map is None:
         for task in tasks:
+            task["static_location"] = parse_trace_tid_location(
+                task["tid"], base_hart_id, cores_per_cluster
+            )
             task["node_id"] = None
             task["static_kernel"] = None
             task["static_label"] = None
-            task["static_note"] = "disabled"
+            task["static_note"] = "location_only"
         return []
 
     streams = static_map["streams"]
@@ -375,7 +401,16 @@ def task_node_label(task):
 
 
 def task_kernel_label(task):
-    return task.get("static_label") or task["kernel"]
+    # Marker classification is more precise for aliases such as L15_Full and
+    # store_and_gather_next. Unknown tasks are replaced during annotation.
+    return task["kernel"]
+
+
+def _task_marker_display(task):
+    marker_class = task.get("marker_class", task["kernel"])
+    if marker_class == "Unknown" and task.get("static_label"):
+        return "no-device-marker/static-inferred"
+    return marker_class
 
 
 def print_unified_timeline(tasks):
@@ -514,6 +549,7 @@ def print_static_mapping_summary(tasks, static_map, mapping_warnings):
         return
 
     print(f"  Workload dir: {static_map['workload_dir']}")
+    print(f"  Mapping source: {static_map.get('mapping_source', 'generated artifacts')}")
     print(
         "  Note: bingo_trace.json does not encode cur_global_task_id; Node labels below are inferred "
         "from per-core descriptor order."
@@ -629,7 +665,133 @@ def compute_overlap(tasks_a, tasks_b):
     return total
 
 
-def print_versacore_efficiency_analysis(tasks):
+def merge_intervals(intervals):
+    """Return sorted, non-overlapping ``(start_ns, end_ns)`` intervals."""
+    merged = []
+    for start, end in sorted(intervals):
+        if end <= start:
+            continue
+        if not merged or start > merged[-1][1]:
+            merged.append([start, end])
+        elif end > merged[-1][1]:
+            merged[-1][1] = end
+    return [(start, end) for start, end in merged]
+
+
+def interval_total(intervals):
+    return sum(end - start for start, end in merge_intervals(intervals))
+
+
+def interval_overlap(intervals_a, intervals_b):
+    """Return the intersection duration of two interval sets."""
+    a = merge_intervals(intervals_a)
+    b = merge_intervals(intervals_b)
+    total = 0
+    ia = ib = 0
+    while ia < len(a) and ib < len(b):
+        start = max(a[ia][0], b[ib][0])
+        end = min(a[ia][1], b[ib][1])
+        if end > start:
+            total += end - start
+        if a[ia][1] <= b[ib][1]:
+            ia += 1
+        else:
+            ib += 1
+    return total
+
+
+def task_sub_event_intervals(tasks, event_names):
+    """Collect exact trace sub-event intervals from task dictionaries."""
+    names = frozenset(event_names)
+    return [
+        (sub["ts"], sub["end"])
+        for task in tasks
+        for sub in task["sub_events"]
+        if sub["name"] in names
+    ]
+
+
+def task_has_sub_event(task, event_name):
+    return any(sub["name"] == event_name for sub in task["sub_events"])
+
+
+def load_moe_efficiency_model(workload_dir):
+    """Read the logical MoE dimensions used for useful-MAC accounting."""
+    params_path = os.path.join(workload_dir, "params.hjson")
+    required = ("total_tokens", "hidden_size", "intermediate_size", "top_k")
+    if not os.path.exists(params_path):
+        raise FileNotFoundError(params_path)
+
+    values = {}
+    field_re = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*(\d+)\b")
+    with open(params_path, encoding="utf-8") as f:
+        for line in f:
+            match = field_re.match(line)
+            if match and match.group(1) in required:
+                values[match.group(1)] = int(match.group(2))
+
+    missing = [name for name in required if name not in values]
+    if missing:
+        raise ValueError(
+            f"{params_path} 缺少计算效率所需字段: {', '.join(missing)}"
+        )
+    return values
+
+
+def infer_individual_cycle_ns(tasks):
+    """Infer the cluster clock period from exact trace duration/cycle pairs."""
+    ratios = []
+    for task in tasks:
+        location = task.get("static_location")
+        if location is None or location[0] not in (2, 3):
+            continue
+        for sub in task["sub_events"]:
+            if sub["dur"] > 0 and sub["dur_cc"] > 0:
+                ratio = sub["dur"] / sub["dur_cc"]
+                if 1.0 <= ratio <= 100.0:
+                    ratios.append(ratio)
+    if not ratios:
+        return None
+    ratios.sort()
+    return ratios[len(ratios) // 2]
+
+
+def collect_active_individual_slot_windows(tasks):
+    """Return active C2/C3 slot windows from gather/store device markers."""
+    windows = {}
+    for cluster in (2, 3):
+        cluster_tasks = [
+            task
+            for task in tasks
+            if task.get("static_location", (None, None))[0] == cluster
+        ]
+        gathers = [
+            task
+            for task in cluster_tasks
+            if task_has_sub_event(task, "BINGO_TRACE_DEV_MOE_GATHER_S1")
+        ]
+        stores = [
+            task
+            for task in cluster_tasks
+            if task_has_sub_event(task, "BINGO_TRACE_DEV_MOE_STORE")
+        ]
+        if not gathers or not stores:
+            continue
+        first = min(gathers, key=lambda task: task["exec_start_ns"])
+        last = max(stores, key=lambda task: task["exec_end_ns"])
+        windows[cluster] = {
+            "start_ns": first["exec_start_ns"],
+            "end_ns": last["exec_end_ns"],
+            "first_node": task_node_label(first),
+            "last_node": task_node_label(last),
+            "active_slots": len(stores),
+        }
+    return windows
+
+
+def print_versacore_efficiency_analysis(
+    tasks, workload_dir, indiv_peak_mac_per_cc=512.0
+):
     """
     调度算法效果专项分析:
 
@@ -638,18 +800,23 @@ def print_versacore_efficiency_analysis(tasks):
       反映 shared expert 结束后等待 individual expert 的尾部开销。
 
     C2/C3 (individual expert):
-      在 [第一个 compute 开始, 最后 store 结束] 窗口内:
-        VersaCore compute%  = 实际计算时间占比
-        DMA-wait%           = VersaCore 空闲 且 DMA 正在运行 (流水线掩盖中, 正常)
+      主计算效率 = 理想计算时间 / [第一个 active slot 开始, 最后一个 active slot 结束]
+      理想计算时间来自有效 MAC 总量和理论峰值，不使用实测 GEMM RUN 时长。
+
+      另在 [第一个 compute 开始, 最后 store 结束] 诊断窗口内:
+        VersaCore RUN%      = 实测 RUN marker 时间占比
+        DMA-task%           = VersaCore 空闲 且 DMA task 区间重叠
         True-idle%          = 两者均空闲 (scheduler/barrier 纯开销, 越小越好)
         Final-store%        = 最后一个 compute 结束后的 DMA store 时间
     """
-    COMPUTE_LABELS_SHARED = frozenset(
-        {
-            "dual_vc_l15_moe_swiglu",
-            "dual_vc_l15_moe_down",
-        }
+    SHARED_RUN_EVENTS = frozenset(
+        {"BINGO_TRACE_L15_FULL_MODE0", "BINGO_TRACE_L15_FULL_MODE1"}
     )
+    SHARED_CFG_EVENTS = frozenset(
+        {"BINGO_TRACE_L15_FULL_CFG", "BINGO_TRACE_L15_FULL_CFG1"}
+    )
+    INDIV_RUN_EVENTS = frozenset({"BINGO_TRACE_GEMM_FULL_RUN"})
+    INDIV_CFG_EVENTS = frozenset({"BINGO_TRACE_GEMM_FULL_CFG"})
     COMPUTE_LABELS_INDIV = frozenset(
         {
             "compute_gate_up_block",
@@ -665,80 +832,185 @@ def print_versacore_efficiency_analysis(tasks):
 
     print()
     print("=" * 130)
-    print("VERSACORE SCHEDULING EFFICIENCY  (VersaCore 调度效率专项分析)")
+    print("VERSACORE COMPUTE EFFICIENCY  (VersaCore 计算效率专项分析)")
     print()
-    print("  C0/C1 指标: VersaCore 有效占比 = compute / (compute + 等待 C2/C3 完成)")
-    print("  C2/C3 指标: 在 pipeline 窗口 [first_compute -> last_store] 内:")
-    print("    VersaCore compute%  = 实际计算时间 / 窗口")
+    print("  主指标只统计 C2/C3 individual expert:")
+    print("    timespan = 第一个 active slot 的 gather task 开始 -> 最后一个 active slot 的 store task 结束")
+    print("    ideal    = useful MAC 总量 / C2+C3 理论峰值")
+    print("    efficiency = ideal compute time / timespan")
+    print("    注意: GEMM_FULL_RUN 实测时长不进入主指标分子")
+    print()
+    print("  辅助诊断指标:")
+    print("    VersaCore RUN-window% = launch-to-drain trace 区间 / 诊断窗口")
     print(
-        "    DMA-wait%           = VersaCore 空闲 且 DMA 在运行 (流水线掩盖 -- 正常但 DMA 是瓶颈)"
+        "    DMA-task-gap%       = VersaCore 空闲且与 DMA task 区间重叠"
     )
     print("    True-idle%          = 两者均空闲 (scheduler/barrier 纯开销 -- 越小越好)")
     print("    Final-store%        = 最后 compute 后的 DMA store 时间")
+    print("    CFG-in-RUN          = active CSR preload 被当前 VC RUN 掩盖的时间")
     print("=" * 130)
+
+    slot_windows = collect_active_individual_slot_windows(tasks)
+    try:
+        model = load_moe_efficiency_model(workload_dir)
+    except (OSError, ValueError) as exc:
+        model = None
+        print(f"\n  [WARN] 无法计算主计算效率: {exc}")
+
+    cycle_ns = infer_individual_cycle_ns(tasks)
+    if model is not None and len(slot_windows) == 2 and cycle_ns is not None:
+        global_start = min(window["start_ns"] for window in slot_windows.values())
+        global_end = max(window["end_ns"] for window in slot_windows.values())
+        timespan_ns = global_end - global_start
+        timespan_cc = timespan_ns / cycle_ns
+        routed_token_expert_pairs = model["total_tokens"] * model["top_k"]
+        mac_per_pair = 3 * model["hidden_size"] * model["intermediate_size"]
+        useful_mac = routed_token_expert_pairs * mac_per_pair
+        total_peak = 2.0 * indiv_peak_mac_per_cc
+        ideal_cc = useful_mac / total_peak
+        ideal_ns = ideal_cc * cycle_ns
+        efficiency = 100.0 * ideal_ns / timespan_ns if timespan_ns else 0.0
+
+        first_cluster = min(
+            slot_windows, key=lambda cluster: slot_windows[cluster]["start_ns"]
+        )
+        last_cluster = max(
+            slot_windows, key=lambda cluster: slot_windows[cluster]["end_ns"]
+        )
+        first_window = slot_windows[first_cluster]
+        last_window = slot_windows[last_cluster]
+
+        print()
+        print("  ══ 主结果: Individual Expert 有效计算效率 ══")
+        print(
+            f"  Workload: {model['total_tokens']} tokens × Top-{model['top_k']} "
+            f"= {routed_token_expert_pairs:,} routed token-expert pairs"
+        )
+        print(
+            f"  每 pair 有效计算量: gate + up + down = "
+            f"3 × {model['hidden_size']} × {model['intermediate_size']} "
+            f"= {mac_per_pair:,} MAC"
+        )
+        print(f"  总有效计算量: {useful_mac:,} MAC")
+        print(
+            f"  理论峰值: 2 clusters × {indiv_peak_mac_per_cc:g} MAC/cc "
+            f"= {total_peak:g} MAC/cc"
+        )
+        print(
+            f"  理想计算时间: {useful_mac:,} / {total_peak:g} "
+            f"= {ideal_cc:,.0f} cc = {ideal_ns:,.0f} ns"
+        )
+        print(
+            f"  timespan 起点: C{first_cluster} {first_window['first_node']} "
+            f"first-slot start = {global_start:,} ns"
+        )
+        print(
+            f"  timespan 终点: C{last_cluster} {last_window['last_node']} "
+            f"last-slot end = {global_end:,} ns"
+        )
+        print(
+            f"  timespan: {timespan_ns:,} ns = {timespan_cc:,.0f} cc "
+            f"(trace cycle = {cycle_ns:g} ns)"
+        )
+        print(
+            f"  ★ 有效计算效率: {ideal_ns:,.0f} / {timespan_ns:,} "
+            f"= {efficiency:.2f}%"
+        )
+        print(
+            "  边界核对: "
+            + ", ".join(
+                f"C{cluster} {window['active_slots']} active slots "
+                f"[{window['start_ns']:,}, {window['end_ns']:,}]"
+                for cluster, window in sorted(slot_windows.items())
+            )
+        )
+    elif model is not None:
+        print()
+        print(
+            "  [WARN] 无法计算主计算效率: "
+            f"active cluster windows={sorted(slot_windows)}, cycle_ns={cycle_ns}"
+        )
 
     # ─── C0/C1 Shared Expert ───────────────────────────────────────────────────────────────
     print()
-    print("  ══ Shared Expert (C0, C1): VersaCore 利用率分析 ══")
+    print("  ══ Shared Expert (C0, C1): Trace RUN 占比诊断（不属于上述主计算效率） ══")
     print()
 
     for cl in [0, 1]:
-        c0_compute = sorted(
-            [
-                t
-                for t in tasks
-                if t.get("static_location") == (cl, 0)
-                and task_kernel_label(t) in COMPUTE_LABELS_SHARED
-            ],
-            key=lambda t: t["exec_start_ns"],
-        )
-        if not c0_compute:
-            print(f"  C{cl}: 无 VersaCore compute 数据，跳过")
-            continue
-
-        compute_busy = sum(t["exec_dur_ns"] for t in c0_compute)
-        last_compute_end = c0_compute[-1]["exec_end_ns"]
-
-        # 找 compute 结束后的下一个任务 (通常是 exit kernel), 其 start 即为等待结束时刻
         c0_all_sorted = sorted(
             [t for t in tasks if t.get("static_location") == (cl, 0)],
             key=lambda t: t["exec_start_ns"],
         )
+        c0_compute = sorted(
+            [
+                t
+                for t in c0_all_sorted
+                if task_sub_event_intervals([t], SHARED_RUN_EVENTS)
+            ],
+            key=lambda t: t["exec_start_ns"],
+        )
+        vc_runs = merge_intervals(
+            task_sub_event_intervals(c0_compute, SHARED_RUN_EVENTS)
+        )
+        if not vc_runs:
+            print(f"  C{cl}: 无 VersaCore compute 数据，跳过")
+            continue
+
+        compute_busy = interval_total(vc_runs)
+        first_compute_start = vc_runs[0][0]
+        last_compute_end = vc_runs[-1][1]
+        cfg_intervals = task_sub_event_intervals(c0_compute, SHARED_CFG_EVENTS)
+        cfg_total = interval_total(cfg_intervals)
+        cfg_in_run = interval_overlap(vc_runs, cfg_intervals)
+
+        # 找 compute 结束后的下一个任务 (通常是 exit kernel), 其 start 即为等待结束时刻
         next_task = next(
             (t for t in c0_all_sorted if t["exec_start_ns"] > last_compute_end), None
         )
-        wait_ns = (
-            next_task["exec_start_ns"] - last_compute_end
-            if next_task
-            else all_end - last_compute_end
-        )
-        total_span = compute_busy + wait_ns
+        window_end = next_task["exec_start_ns"] if next_task else all_end
+        total_span = max(0, window_end - first_compute_start)
+        wait_ns = max(0, total_span - compute_busy)
         vc_useful = 100.0 * compute_busy / total_span if total_span > 0 else 0.0
 
         print(f"  C{cl} (Shared Expert {cl} -- core0 VersaCore):")
         for t in c0_compute:
             lbl = task_kernel_label(t)
-            cc = t.get("exec_dur_cc", 0)
-            print(f"    {lbl:<35s}  {t['exec_dur_ns']:>10,} ns  ({cc:,} cc)")
+            run_ns = interval_total(task_sub_event_intervals([t], SHARED_RUN_EVENTS))
+            print(f"    {lbl:<35s}  RUN={run_ns:>10,} ns  node={t['exec_dur_ns']:>10,} ns")
         print(f"    {'─' * 55}")
         print(
             f"    {'VersaCore 总计':<35s}  {compute_busy:>10,} ns  ({compute_busy / 1e3:.1f} us)"
         )
         print(
-            f"    {'等待 C2/C3 完成 (tail wait)':<35s}  {wait_ns:>10,} ns  ({wait_ns / 1e3:.1f} us)"
+            f"    {'非 VC / 等待 C2/C3 (tail)':<35s}  {wait_ns:>10,} ns  ({wait_ns / 1e3:.1f} us)"
         )
         print(
-            f"    ★ VersaCore 有效占比:              {vc_useful:>8.1f}%  [= compute / (compute + tail)]"
+            f"    {'Active CFG 被 RUN 掩盖':<35s}  {cfg_in_run:>10,} ns  "
+            f"({100.0 * cfg_in_run / cfg_total if cfg_total else 0.0:.1f}% of CFG)"
+        )
+        print(
+            f"    ★ Trace RUN/tail 窗口占比:         {vc_useful:>8.1f}%  [辅助诊断]"
         )
         print()
 
     # ─── C2/C3 Individual Expert ──────────────────────────────────────────────────────────
     print()
-    print("  ══ Individual Expert (C2, C3): DMA-Compute 流水线效率 ══")
+    print("  ══ Individual Expert (C2, C3): 实测 RUN / DMA 诊断（不作为主效率分子） ══")
     print()
 
+    DMA_LABELS_INDIV = frozenset(
+        {
+            "gather_s1",
+            "load_gate_up_block",
+            "load_down_block",
+            "prefetch_s2_down",
+            "prefetch_s4_next_s1",
+            "store",
+        }
+    )
+
     for cl in [2, 3]:
-        c0_compute = sorted(
+        c0_compute_static = sorted(
             [
                 t
                 for t in tasks
@@ -747,18 +1019,32 @@ def print_versacore_efficiency_analysis(tasks):
             ],
             key=lambda t: t["exec_start_ns"],
         )
+        c0_compute = [
+            t
+            for t in c0_compute_static
+            if task_sub_event_intervals([t], INDIV_RUN_EVENTS)
+        ]
         c1_all = sorted(
             [t for t in tasks if t.get("static_location") == (cl, 1)],
             key=lambda t: t["exec_start_ns"],
         )
-        if not c0_compute:
+        c1_dma_static = [
+            t for t in c1_all if task_kernel_label(t) in DMA_LABELS_INDIV
+        ]
+        c1_dma = [
+            t for t in c1_dma_static if t.get("marker_class") != "Unknown"
+        ]
+        vc_runs = merge_intervals(
+            task_sub_event_intervals(c0_compute, INDIV_RUN_EVENTS)
+        )
+        if not vc_runs:
             print(f"  C{cl}: 无 compute 数据，跳过")
             continue
 
         # Pipeline window = [first compute start, last store end]
         store_tasks = [t for t in c1_all if task_kernel_label(t) == "store"]
-        pipeline_start = c0_compute[0]["exec_start_ns"]
-        last_compute_end = c0_compute[-1]["exec_end_ns"]
+        pipeline_start = vc_runs[0][0]
+        last_compute_end = vc_runs[-1][1]
         last_store_end = (
             max(t["exec_end_ns"] for t in store_tasks)
             if store_tasks
@@ -767,27 +1053,32 @@ def print_versacore_efficiency_analysis(tasks):
         pipeline_end = max(last_compute_end, last_store_end)
         pipeline_span = pipeline_end - pipeline_start
 
-        compute_busy = sum(t["exec_dur_ns"] for t in c0_compute)
+        compute_busy = interval_total(vc_runs)
+        cfg_intervals = task_sub_event_intervals(c0_compute, INDIV_CFG_EVENTS)
+        cfg_total = interval_total(cfg_intervals)
+        cfg_in_run = interval_overlap(vc_runs, cfg_intervals)
 
-        # Gap analysis between consecutive compute tasks
+        # Gap analysis between consecutive accelerator RUN intervals. DMA is
+        # represented by its task interval; count only the exact intersection.
+        dma_task_intervals = merge_intervals(
+            (t["exec_start_ns"], t["exec_end_ns"]) for t in c1_dma
+        )
         dma_wait_ns = 0
         true_idle_ns = 0
         gap_log = []  # (type, gap_ns) for debugging
-        for i in range(1, len(c0_compute)):
-            gap_s = c0_compute[i - 1]["exec_end_ns"]
-            gap_e = c0_compute[i]["exec_start_ns"]
+        for i in range(1, len(vc_runs)):
+            gap_s = vc_runs[i - 1][1]
+            gap_e = vc_runs[i][0]
             gap = gap_e - gap_s
             if gap <= 0:
                 continue
-            dma_running = any(
-                t["exec_start_ns"] < gap_e and t["exec_end_ns"] > gap_s for t in c1_all
-            )
-            if dma_running:
-                dma_wait_ns += gap
-                gap_log.append(("DMA-wait", gap))
-            else:
-                true_idle_ns += gap
-                gap_log.append(("true-idle", gap))
+            dma_overlap = interval_overlap([(gap_s, gap_e)], dma_task_intervals)
+            dma_wait_ns += dma_overlap
+            true_idle_ns += gap - dma_overlap
+            if dma_overlap:
+                gap_log.append(("DMA-task", dma_overlap))
+            if gap > dma_overlap:
+                gap_log.append(("true-idle", gap - dma_overlap))
 
         # Tail after last compute (store running)
         store_tail_ns = max(0, pipeline_end - last_compute_end)
@@ -795,16 +1086,18 @@ def print_versacore_efficiency_analysis(tasks):
         # DMA stats within pipeline window (tasks that overlap [pipeline_start, pipeline_end])
         window_c1 = [
             t
-            for t in c1_all
+            for t in c1_dma
             if t["exec_start_ns"] < pipeline_end and t["exec_end_ns"] > pipeline_start
         ]
-        # Clip each DMA task to window and sum
-        dma_busy_clipped = sum(
-            min(t["exec_end_ns"], pipeline_end)
-            - max(t["exec_start_ns"], pipeline_start)
+        dma_intervals = merge_intervals(
+            (
+                max(t["exec_start_ns"], pipeline_start),
+                min(t["exec_end_ns"], pipeline_end),
+            )
             for t in window_c1
         )
-        overlap_ns = compute_overlap(c0_compute, window_c1)
+        dma_busy_clipped = interval_total(dma_intervals)
+        overlap_ns = interval_overlap(vc_runs, dma_intervals)
         dma_overlap_rate = (
             100.0 * overlap_ns / dma_busy_clipped if dma_busy_clipped > 0 else 0.0
         )
@@ -820,7 +1113,8 @@ def print_versacore_efficiency_analysis(tasks):
             f"  (span = {pipeline_span:,} ns = {pipeline_span / 1e3:.1f} us)"
         )
         print(
-            f"  core0 compute 任务: {len(c0_compute)}  |  core1 DMA 任务 (窗口内): {len(window_c1)}"
+            f"  core0 active compute: {len(c0_compute)} / static nodes: {len(c0_compute_static)}  "
+            f"|  core1 active DMA (窗口内): {len(window_c1)} / static nodes: {len(c1_dma_static)}"
         )
         print()
 
@@ -839,20 +1133,24 @@ def print_versacore_efficiency_analysis(tasks):
             ts_list = by_type.get(lbl, [])
             if not ts_list:
                 continue
-            dur = sum(t["exec_dur_ns"] for t in ts_list)
+            dur = interval_total(task_sub_event_intervals(ts_list, INDIV_RUN_EVENTS))
             pct = 100.0 * dur / pipeline_span
             print(f"      {lbl:<35s}  x{len(ts_list):2d}  {dur:>10,} ns  ({pct:5.1f}%)")
         print(f"      {'─' * 65}")
         print(
             f"      {'VersaCore 合计':<40s}  {compute_busy:>10,} ns  ({vc_util:5.1f}%)"
         )
+        print(
+            f"      {'Active CFG 被 RUN 掩盖':<40s}  {cfg_in_run:>10,} ns  "
+            f"({100.0 * cfg_in_run / cfg_total if cfg_total else 0.0:5.1f}% of CFG)"
+        )
         print()
 
         print(f"    Gap / Stall 分解 (pipeline 窗口内 VersaCore 空闲时间):")
         print(
-            f"      DMA-wait (DMA 运行中, VersaCore 等待):      {dma_wait_ns:>10,} ns  ({dma_wait_pct:5.1f}%)"
+            f"      DMA-task gap (与 DMA task 重叠):           {dma_wait_ns:>10,} ns  ({dma_wait_pct:5.1f}%)"
         )
-        print(f"        -> DMA 是瓶颈, 流水线掩盖中但未完全掩盖")
+        print(f"        -> task 区间证据；不等同于 DMA 硬件 busy counter")
         print(
             f"      True-idle (scheduler/barrier 纯开销):        {true_idle_ns:>10,} ns  ({true_idle_pct:5.1f}%)"
         )
@@ -869,10 +1167,10 @@ def print_versacore_efficiency_analysis(tasks):
         )
         print()
 
-        print(f"    ★ 调度效率摘要 [C{cl}]:")
-        print(f"      VersaCore 利用率 (compute/window): {vc_util:>7.1f}%")
+        print(f"    ★ 辅助诊断摘要 [C{cl}]:")
+        print(f"      VersaCore RUN-window 占比:          {vc_util:>7.1f}%")
         print(
-            f"      DMA 流水线等待 (DMA-wait):         {dma_wait_pct:>7.1f}%  <- DMA 带宽限制, 非调度问题"
+            f"      与 DMA task 重叠的 VC gap:          {dma_wait_pct:>7.1f}%"
         )
         print(
             f"      调度/barrier 纯开销 (True-idle):   {true_idle_pct:>7.1f}%  <- 调度优化目标"
@@ -901,7 +1199,10 @@ def print_versacore_efficiency_analysis(tasks):
 
             for s in range(n_slots):
                 sl_comp = c0_compute[s * COMPUTE_PER_SLOT : (s + 1) * COMPUTE_PER_SLOT]
-                sl_last_end = sl_comp[-1]["exec_end_ns"]
+                sl_runs = merge_intervals(
+                    task_sub_event_intervals(sl_comp, INDIV_RUN_EVENTS)
+                )
+                sl_last_end = sl_runs[-1][1]
                 sl_gather_start = gather_tasks_sorted[s]["exec_start_ns"]
 
                 # Find first store that starts after or at gather_start of this slot
@@ -920,14 +1221,14 @@ def print_versacore_efficiency_analysis(tasks):
                     and t["exec_end_ns"] > sl_gather_start
                 ]
 
-                sl_compute_busy = sum(t["exec_dur_ns"] for t in sl_comp)
+                sl_compute_busy = interval_total(sl_runs)
                 sl_vc_util = 100.0 * sl_compute_busy / sl_span if sl_span > 0 else 0.0
 
                 sl_dma_wait = 0
                 sl_true_idle = 0
-                for i in range(1, len(sl_comp)):
-                    gs = sl_comp[i - 1]["exec_end_ns"]
-                    ge = sl_comp[i]["exec_start_ns"]
+                for i in range(1, len(sl_runs)):
+                    gs = sl_runs[i - 1][1]
+                    ge = sl_runs[i][0]
                     g = ge - gs
                     if g <= 0:
                         continue
@@ -1532,7 +1833,7 @@ def print_sub_event_detail(tasks):
             continue
         print(
             f"\n  Task #{i}: {t['tid']} seq={t['seq']} node={task_node_label(t)} "
-            f"kernel={task_kernel_label(t)} marker_class={t.get('marker_class', t['kernel'])}"
+            f"kernel={task_kernel_label(t)} marker_class={_task_marker_display(t)}"
             f"  exec=[{t['exec_start_ns']:,} - {t['exec_end_ns']:,}] ({t['exec_dur_ns']:,} ns)"
         )
         subs = sorted(t["sub_events"], key=lambda s: s["ts"])
@@ -1586,6 +1887,13 @@ def print_moe_slot_skip_analysis(tasks, skip_threshold_cc=1000):
     S2PF_LABELS = {"prefetch_s2_down"}
     S4PF_LABELS = {"prefetch_s4_next_s1"}
     SLOT_START_LABEL = "gather_s1"  # 每个 slot 的第一个节点
+    SLOT_END_LABEL = "store_and_gather_next"
+    COMPUTE_LABELS = {
+        "compute_gate_up_block",
+        "compute_gate_up_full",
+        "compute_down_block",
+        "compute_down_full",
+    }
 
     # per-slot 内节点顺序（用于节点明细表）
     CHAIN_ORDER = [
@@ -1637,7 +1945,12 @@ def print_moe_slot_skip_analysis(tasks, skip_threshold_cc=1000):
 
         # 按 cluster 的两个 core 分组（按绝对时间排序）
         core0_tasks = sorted(
-            [t for t in sorted_t if t.get("static_location", (0, 99))[1] == 0],
+            [
+                t
+                for t in sorted_t
+                if t.get("static_location", (0, 99))[1] == 0
+                and (t.get("static_label") or "") in COMPUTE_LABELS
+            ],
             key=lambda t: t["exec_start_ns"],
         )
         core1_tasks = sorted(
@@ -1645,30 +1958,46 @@ def print_moe_slot_skip_analysis(tasks, skip_threshold_cc=1000):
             key=lambda t: t["exec_start_ns"],
         )
 
-        # 按 static_label 分 slot：每遇到 gather_s1 (core1) 开一个新 slot
-        slots = []
+        # Slot 0 starts with gather_s1. Later slots reuse the previous slot's
+        # store_and_gather_next task, so the static boundary is the end task,
+        # not another standalone gather_s1 node.
+        first_dynamic = next(
+            (
+                i
+                for i, task in enumerate(core1_tasks)
+                if (task.get("static_label") or "") == SLOT_START_LABEL
+            ),
+            None,
+        )
+        all_slots = []
         cur_slot_core1 = []
-        for t in core1_tasks:
+        for t in core1_tasks[first_dynamic:] if first_dynamic is not None else []:
             lbl = t.get("static_label") or t.get("kernel") or ""
-            if lbl == SLOT_START_LABEL and cur_slot_core1:
-                slots.append(cur_slot_core1)
-                cur_slot_core1 = []
             cur_slot_core1.append(t)
-        if cur_slot_core1:
-            slots.append(cur_slot_core1)
+            if lbl == SLOT_END_LABEL:
+                all_slots.append(cur_slot_core1)
+                cur_slot_core1 = []
+
+        # Inactive static slots have no device store marker. Keep only slots
+        # that the runtime scheduler actually activated in this round.
+        slots = [
+            (static_idx, slot_nodes)
+            for static_idx, slot_nodes in enumerate(all_slots)
+            if task_has_sub_event(slot_nodes[-1], "BINGO_TRACE_DEV_MOE_STORE")
+        ]
 
         if not slots:
-            print(f"\n  {cl_label}: 未找到以 gather_s1 开头的 slot 链，跳过。")
+            print(f"\n  {cl_label}: 未找到 active dynamic slot，跳过。")
             continue
 
-        print(f"\n  ─── {cl_label}: {len(slots)} slots ───")
+        print(f"\n  ─── {cl_label}: {len(slots)} active slots ───")
         print()
 
         hdr = (
             f"    {'Slot':>4s}  {'Seq':>4s}  "
             f"{'skip_s1':>7s}  {'skip_s3':>7s}  {'s2_pf':>5s}  {'s4_pf':>5s}  "
             f"{'S1_dur_cc':>11s}  {'S3_dur_cc':>11s}  "
-            f"{'slot_start_ns':>15s}  {'slot_dur_ns':>12s}  {'#nodes':>6s}"
+            f"{'gather_start_ns':>15s}  {'slot_dur_ns':>12s}  {'#nodes':>6s}"
         )
         print(hdr)
         print("    " + "─" * (len(hdr) - 4))
@@ -1678,19 +2007,37 @@ def print_moe_slot_skip_analysis(tasks, skip_threshold_cc=1000):
         total_s2pf = 0
         total_s4pf = 0
 
-        for slot_idx, slot_nodes in enumerate(slots):
+        for active_slot_idx, (static_slot_idx, slot_nodes) in enumerate(slots):
             # slot 时间范围：取本 slot core1 任务的时间 + 对应 core0 任务
-            slot_start_ns = slot_nodes[0]["exec_start_ns"]
+            if static_slot_idx == 0:
+                gather_task = slot_nodes[0]
+            else:
+                gather_task = all_slots[static_slot_idx - 1][-1]
+            gather_events = [
+                sub
+                for sub in gather_task["sub_events"]
+                if sub["name"] == "BINGO_TRACE_DEV_MOE_GATHER_S1"
+            ]
+            slot_start_ns = (
+                gather_events[0]["ts"]
+                if gather_events
+                else gather_task["exec_start_ns"]
+            )
             slot_end_ns_c1 = max(t["exec_end_ns"] for t in slot_nodes)
             # 估计 core0 对应的任务时间范围（位于 slot 时间段内）
             # slot_idx 决定 core0 任务的 slice（每 slot 消耗 len(core0_per_slot) 个 core0 任务）
             # chain 中 core0 有: compute_gate_up_block×2, compute_gate_up_full,
             #                    compute_down_block×2, compute_down_full = 6 nodes
             CORE0_PER_SLOT = 6
-            c0_start = slot_idx * CORE0_PER_SLOT
+            c0_start = static_slot_idx * CORE0_PER_SLOT
             c0_end = c0_start + CORE0_PER_SLOT
             slot_core0 = core0_tasks[c0_start:c0_end]
-            all_slot_tasks = slot_nodes + slot_core0
+            slot_core1_for_display = (
+                slot_nodes
+                if static_slot_idx == 0
+                else [gather_task] + slot_nodes
+            )
+            all_slot_tasks = slot_core1_for_display + slot_core0
             slot_end_ns = (
                 max(t["exec_end_ns"] for t in all_slot_tasks)
                 if all_slot_tasks
@@ -1742,10 +2089,11 @@ def print_moe_slot_skip_analysis(tasks, skip_threshold_cc=1000):
 
             # 验证标记：如果 skip_s1=SKIP 但没有 s4pf 且不是第一个 slot → 可疑
             warn = ""
-            if s1_skip and not s4pf_ran and slot_idx > 0:
-                prev_slot_nodes = slots[slot_idx - 1]
+            if s1_skip and not s4pf_ran and static_slot_idx > 0:
+                prev_slot_nodes = all_slots[static_slot_idx - 1]
                 prev_slot_core0 = core0_tasks[
-                    (slot_idx - 1) * CORE0_PER_SLOT : slot_idx * CORE0_PER_SLOT
+                    (static_slot_idx - 1) * CORE0_PER_SLOT : static_slot_idx
+                    * CORE0_PER_SLOT
                 ]
                 prev_s4pf = [
                     t
@@ -1757,7 +2105,7 @@ def print_moe_slot_skip_analysis(tasks, skip_threshold_cc=1000):
                     warn = "  ⚠ skip_s1 but no prior S4_PF"
 
             print(
-                f"    {slot_idx:4d}  {len(all_slot_tasks):4d}  "
+                f"    {active_slot_idx:4d}  {len(all_slot_tasks):4d}  "
                 f"{skip_s1_str}  {skip_s3_str}  {s2pf_str}  {s4pf_str}  "
                 f"{s1_dur_str:>11s}  {s3_dur_str:>11s}  "
                 f"{slot_start_ns:>15,}  {slot_dur_ns:>12,}{warn}"
@@ -1765,7 +2113,9 @@ def print_moe_slot_skip_analysis(tasks, skip_threshold_cc=1000):
 
             # ── per-node 明细表（slot 内各节点耗时）──
             print(
-                f"\n      [Slot {slot_idx} 节点明细]  core1={len(slot_nodes)}nodes  core0={len(slot_core0)}nodes  span={slot_dur_ns:,} ns"
+                f"\n      [Slot {active_slot_idx} 节点明细]  "
+                f"core1={len(slot_core1_for_display)}nodes  "
+                f"core0={len(slot_core0)}nodes  span={slot_dur_ns:,} ns"
             )
             node_hdr = (
                 f"      {'#':>3s}  {'Node':>6s}  {'Core':>4s}  {'Kernel':<26s}"
@@ -1818,7 +2168,7 @@ def print_dma_cfg_run_breakdown(tasks):
 
     Compute 指标（来自内层 dual_vc GEMM sub-events，若已插桩）：
       GEMM_CFG  = VersaCore streamer CSR 配置时间
-      GEMM_RUN  = 实际矩阵计算时间（VersaCore busy）
+      GEMM_RUN  = VC+streamer launch-to-drain trace 时间
     """
     DMA_KERNELS = frozenset(
         {
@@ -1870,7 +2220,7 @@ def print_dma_cfg_run_breakdown(tasks):
     )
     print()
     print("  Compute kernel 子事件 (来自内层 dual_vc GEMM):")
-    print("    GEMM_CFG = streamer CSR 配置   GEMM_RUN = 实际矩阵计算")
+    print("    GEMM_CFG = streamer/VC CSR 配置   GEMM_RUN = VC+streamer launch-to-drain")
     print("=" * 130)
 
     CL_LABEL = {
@@ -1958,7 +2308,8 @@ def print_dma_cfg_run_breakdown(tasks):
                         n_xcfg = sub_count(t["sub_events"], "DMA_XDMA_CFG")
                         n_xwait = sub_count(t["sub_events"], "DMA_XDMA_WAIT")
                         n_iwait = sub_count(t["sub_events"], "DMA_IDMA_WAIT")
-                        node_s = f"N{t.get('node_id', '?'):3}"
+                        node_id = t.get("node_id")
+                        node_s = f"N{node_id:3}" if isinstance(node_id, int) else "N  ?"
                         print(
                             f"      {node_s}  {t['exec_dur_cc']:>8} cc  "
                             f"xCFG×{n_xcfg}={t_xcfg:>8,}ns  "
@@ -2034,6 +2385,7 @@ def print_dma_cfg_run_breakdown(tasks):
                     f"{'Arg_ns':>10s}({'Arg/Gap':>7s})  "
                     f"{'CFG_ns':>10s}({'CFG/DEV':>7s})  "
                     f"{'RUN_ns':>10s}({'RUN/DEV':>7s})  "
+                    f"{'CFG_in_RUN':>10s}  "
                     f"{'DevOH_ns':>10s}({'OH/DEV':>6s})"
                 )
                 print(hdr)
@@ -2050,21 +2402,34 @@ def print_dma_cfg_run_breakdown(tasks):
                         else 0
                     )
                     arg_ns = sum(sub_sum_exact(t["sub_events"], "BINGO_TRACE_KERNEL_ARG_PARSE") for t in kt)
-                    cfg_ns = sum(sub_sum(t["sub_events"], "GEMM_FULL_CFG") for t in kt)
-                    run_ns = sum(sub_sum(t["sub_events"], "GEMM_FULL_RUN") for t in kt)
+                    cfg_intervals = task_sub_event_intervals(
+                        kt, {"BINGO_TRACE_GEMM_FULL_CFG"}
+                    )
+                    run_intervals = task_sub_event_intervals(
+                        kt, {"BINGO_TRACE_GEMM_FULL_RUN"}
+                    )
+                    cfg_ns = interval_total(cfg_intervals)
+                    run_ns = interval_total(run_intervals)
+                    cfg_in_run_ns = interval_overlap(cfg_intervals, run_intervals)
+                    covered_ns = interval_total(cfg_intervals + run_intervals)
                     entry_gap_ns = total_ns - dev_ns if dev_ns > 0 else 0
-                    dev_oh_ns = dev_ns - cfg_ns - run_ns if dev_ns > 0 else total_ns - cfg_ns - run_ns
+                    dev_oh_ns = (
+                        dev_ns - covered_ns if dev_ns > 0 else total_ns - covered_ns
+                    )
                     print(
                         f"    {kname:<26s}  {len(kt):4d}  {total_ns:>10,}  "
                         f"{dev_ns:>10,}  {entry_gap_ns:>10,}  "
                         f"{arg_ns:>10,}({pct(arg_ns,entry_gap_ns)})  "
                         f"{cfg_ns:>10,}({pct(cfg_ns,dev_ns)})  "
                         f"{run_ns:>10,}({pct(run_ns,dev_ns)})  "
+                        f"{cfg_in_run_ns:>10,}  "
                         f"{dev_oh_ns:>10,}({pct(dev_oh_ns,dev_ns)})"
                     )
                 print(
                     "    NOTE: Node_ns is the real Bingo node execution time (RUN_KERNEL start→end). "
-                    "DEV/Arg/CFG/RUN only break down where that node time is spent; they do not redefine node start/end."
+                    "RUN is the VC+streamer launch-to-drain window, not the internal VC busy counter. "
+                    "CFG_in_RUN is active-buffer preload hidden by the current run; DevOH subtracts "
+                    "the union of CFG and RUN so overlapping time is not subtracted twice."
                 )
             print()
 
@@ -2237,6 +2602,12 @@ def main():
         action="store_true",
         help="Warn if a traced core consumes only part of its static stream",
     )
+    parser.add_argument(
+        "--indiv-peak-mac-per-cc",
+        type=float,
+        default=512.0,
+        help="单个 individual cluster 的双 VersaCore 理论峰值 (默认: 512 MAC/cc)",
+    )
     args = parser.parse_args()
 
     # 自动检测 workload dir：用户未指定时从 uart log 推断
@@ -2306,6 +2677,15 @@ def main():
     for kname, cnt in kernel_counts.most_common():
         total_dur = sum(t["exec_dur_ns"] for t in tasks if t["kernel"] == kname)
         print(f"    {kname:<14s}: {cnt:3d} 次, 总耗时 {total_dur:>12,} ns")
+    inferred_without_marker = sum(
+        t.get("marker_class") == "Unknown" and bool(t.get("static_label"))
+        for t in tasks
+    )
+    if inferred_without_marker:
+        print(
+            f"    无设备 marker、由 header 恢复命名: {inferred_without_marker:3d} 次 "
+            "(inactive/skip 或无专用 marker)"
+        )
     print()
 
     static_kernel_counts = Counter(task_kernel_label(t) for t in tasks)
@@ -2329,7 +2709,11 @@ def main():
     print_dma_cfg_run_breakdown(tasks)
     print_phase_transition_analysis(tasks, phase_events)
     print_utilization(tasks)
-    print_versacore_efficiency_analysis(tasks)
+    print_versacore_efficiency_analysis(
+        tasks,
+        args.workload_dir,
+        indiv_peak_mac_per_cc=args.indiv_peak_mac_per_cc,
+    )
     print_scheduling_overhead(tasks)
     print_sub_event_detail(tasks)
 
