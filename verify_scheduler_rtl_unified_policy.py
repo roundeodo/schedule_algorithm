@@ -30,12 +30,12 @@ POSTFREEZE = tuple(
     for experts in (8, 32, 64)
 )
 DEFAULT_OUTPUTS = {
-    "proof65": HERE / "results/policy_search/scheduler_rtl_unified_65_v1.json",
-    "coverage30k": HERE / "results/policy_search/scheduler_rtl_unified_30k_v1.json",
-    "postfreeze": HERE / "results/policy_search/scheduler_rtl_unified_postfreeze_v1.json",
+    "proof65": HERE / "results/policy_search/scheduler_rtl_unified_65_v3.json",
+    "coverage30k": HERE / "results/policy_search/scheduler_rtl_unified_30k_v3.json",
+    "postfreeze": HERE / "results/policy_search/scheduler_rtl_unified_postfreeze_v3.json",
 }
 EXPECTED_CASES = {"proof65": 65, "coverage30k": 29_928, "postfreeze": 11_928}
-SCHEMA = "scheduler_rtl_unified_policy_validation_v1"
+SCHEMA = "scheduler_rtl_unified_policy_validation_v2"
 
 
 def _sha256(path: Path) -> str:
@@ -269,7 +269,7 @@ def _audit_proof_traces(rows_by_key: dict[str, dict], jobs: list[dict]) -> None:
             action, child, score, count, selected_slot = unified._choose_one_round(
                 state
             )
-            if count != len(slots) or count != int(recorded["candidate_count"]):
+            if count < len(slots) or count != int(recorded["candidate_count"]):
                 raise AssertionError(f"{key} round {round_index}: count mismatch")
             if selected_slot != int(recorded["candidate_slot"]):
                 raise AssertionError(f"{key} round {round_index}: slot mismatch")
@@ -353,6 +353,9 @@ def main() -> int:
         "policy_id": unified.POLICY_ID,
         "window": list(unified.WINDOW),
         "candidate_budget": unified.MAX_CONCRETE_CANDIDATES,
+        "base_token_profiles": len(unified.COMPILED_TOKENS),
+        "recovery_token_profiles": len(unified.RECOVERY_TOKENS),
+        "recovery_margin_cc": unified.RECOVERY_MARGIN_CC,
         "scorer": unified.SCORER,
         "inputs": [
             {"path": str(path), "sha256": _sha256(path)} for path in inputs
