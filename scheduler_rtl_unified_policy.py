@@ -2,8 +2,9 @@
 """Single-path RTL-oriented scheduler with a compiled T6+B2 candidate bank.
 
 The runtime evaluates a protected base bank and a small fixed recovery bank.
-Recovery profiles are locally reduced by current-round finish time, then the
-same bounded integer scorer evaluates base candidates and recovery-family
+Each recovery profile accepts its first legal event-aligned start; recovery
+profiles are then locally reduced by current-round finish time.  The same
+bounded integer scorer evaluates the protected winner and recovery-family
 winners.  A recovery winner must improve the primary score by one full tick.
 There is one committed path and one commit per round.  Candidate templates are
 Python constants that mirror combinational decode cases; no JSON policy, ROM
@@ -20,9 +21,9 @@ import evaluate_olmoe_fixed_token_banks as policy
 import four_stage_scheduler as reference
 
 
-POLICY_ID = "rtl-unified-t6b2-protected24-v3"
+POLICY_ID = "rtl-unified-t6b2-protected18-v4"
 WINDOW = (6, 2)
-MAX_CONCRETE_CANDIDATES = 24
+MAX_CONCRETE_CANDIDATES = 18
 TICK_CC = policy.TICK_CC
 SCORER = policy.HEAD5_HIST4_PAIRWISE_SCORER
 RECOVERY_MARGIN_CC = TICK_CC
@@ -294,12 +295,11 @@ def _compiled_recovery_tokens() -> tuple[policy.ExplicitCandidateToken, ...]:
 
     These constants are hard-wired decode cases, not runtime-programmable
     storage.  Only profiles legal for the current mode/cache state materialize.
-    The active concrete stream is asserted to remain within 24 entries.
+    The active concrete stream is asserted to remain within 18 entries.
     """
     return (
         _token(_logical("SYNC", "SINGLE", "T0"), _profile(c3_dma_s1="IDMA", c3_dma_s3="IDMA", c3_s1="A(M8,bw32)", c3_s3="B(M4,bw64)")),
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c2_dma_s1="XDMA", c2_dma_s3="IDMA", c2_s1="A(M8,bw32)", c2_s3="B(M4,bw64)")),
-        _token(_logical("SYNC", "SINGLE", "T0"), _profile(c3_dma_s1="IDMA", c3_s1="A(M8,bw32)", c3_s2pf="IDMA", c3_s3="B(M4,bw64)", c3_s3_cached=True)),
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c2_dma_s1="XDMA", c2_dma_s3="XDMA", c2_s1="A(M8,bw32)", c2_s3="B(M4,bw64)")),
         _token(_logical("SYNC", "SINGLE", "T0"), _profile(c2_dma_s1="IDMA", c2_dma_s3="IDMA", c2_s1="B(M4,bw64)", c2_s3="B(M4,bw64)")),
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c2_dma_s1="XDMA", c2_dma_s3="IDMA", c2_s1="B(M4,bw64)", c2_s3="B(M4,bw64)")),
@@ -313,9 +313,7 @@ def _compiled_recovery_tokens() -> tuple[policy.ExplicitCandidateToken, ...]:
         _token(_logical("SYNC", "SINGLE", "T0"), _profile(c2_dma_s1="IDMA", c2_dma_s3="IDMA", c2_s1="A(M8,bw32)", c2_s3="B(M4,bw64)")),
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c3_dma_s1="XDMA", c3_dma_s3="IDMA", c3_s1="A(M8,bw32)", c3_s3="B(M4,bw64)")),
         _token(_logical("SYNC", "SINGLE", "T0"), _profile(c2_s1="C(M2,bw128)", c2_s1_cached=True, c2_s3="C(M2,bw128)", c2_s3_cached=True)),
-        _token(_logical("TERMINAL", "SINGLE", "T0"), _profile(c2_dma_s1="XDMA", c2_dma_s3="IDMA", c2_s1="A(M8,bw32)", c2_s3="B(M4,bw64)")),
         _token(_logical("SYNC", "SINGLE", "T0"), _profile(c2_dma_s1="BOTH", c2_dma_s3="BOTH", c2_s1="C(M2,bw128)", c2_s3="C(M2,bw128)")),
-        _token(_logical("TERMINAL", "SINGLE", "T0"), _profile(c2_dma_s1="XDMA", c2_dma_s3="XDMA", c2_s1="A(M8,bw32)", c2_s3="B(M4,bw64)")),
         _token(_logical("SYNC", "SINGLE", "T0"), _profile(c3_dma_s1="BOTH", c3_dma_s3="BOTH", c3_s1="C(M2,bw128)", c3_s3="C(M2,bw128)")),
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c2_dma_s1="IDMA", c2_dma_s3="IDMA", c2_s1="A(M8,bw32)", c2_s3="B(M4,bw64)")),
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c3_dma_s1="XDMA", c3_dma_s3="XDMA", c3_s1="A(M8,bw32)", c3_s3="B(M4,bw64)")),
@@ -323,22 +321,13 @@ def _compiled_recovery_tokens() -> tuple[policy.ExplicitCandidateToken, ...]:
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c3_dma_s1="IDMA", c3_dma_s3="IDMA", c3_s1="A(M8,bw32)", c3_s3="B(M4,bw64)")),
         _token(_logical("TERMINAL", "SINGLE", "T0"), _profile(c3_dma_s1="XDMA", c3_dma_s3="XDMA", c3_s1="B(M4,bw64)", c3_s3="B(M4,bw64)")),
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c3_dma_s1="XDMA", c3_dma_s3="BOTH", c3_s1="B(M4,bw64)", c3_s3="C(M2,bw128)")),
-        _token(_logical("SYNC", "SINGLE", "T0"), _profile(c3_s1="C(M2,bw128)", c3_s1_cached=True, c3_s3="C(M2,bw128)", c3_s3_cached=True)),
-        _token(_logical("TERMINAL", "SINGLE", "T0"), _profile(c2_dma_s1="XDMA", c2_dma_s3="XDMA", c2_s1="B(M4,bw64)", c2_s3="B(M4,bw64)")),
-        _token(_logical("TERMINAL", "SINGLE", "T0"), _profile(c2_dma_s1="XDMA", c2_dma_s3="IDMA", c2_s1="B(M4,bw64)", c2_s3="B(M4,bw64)")),
-        _token(_logical("TERMINAL", "SINGLE", "T0"), _profile(c3_dma_s1="XDMA", c3_dma_s3="XDMA", c3_s1="A(M8,bw32)", c3_s3="B(M4,bw64)")),
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c3_dma_s1="IDMA", c3_dma_s3="IDMA", c3_s1="B(M4,bw64)", c3_s3="B(M4,bw64)")),
         _token(_logical("TERMINAL", "SINGLE", "T0"), _profile(c3_dma_s1="XDMA", c3_dma_s3="IDMA", c3_s1="B(M4,bw64)", c3_s3="B(M4,bw64)")),
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c2_dma_s1="BOTH", c2_dma_s3="XDMA", c2_s1="C(M2,bw128)", c2_s3="B(M4,bw64)")),
-        _token(_logical("TERMINAL", "SINGLE", "T0"), _profile(c3_dma_s1="XDMA", c3_dma_s3="IDMA", c3_s1="A(M8,bw32)", c3_s3="B(M4,bw64)")),
         _token(_logical("ONE_IDLE", "SINGLE", "T0"), _profile(c2_dma_s1="IDMA", c2_dma_s3="XDMA", c2_s1="B(M4,bw64)", c2_s3="B(M4,bw64)")),
         _token(_logical("TERMINAL", "SINGLE", "T0"), _profile(c2_dma_s1="XDMA", c2_dma_s3="BOTH", c2_s1="B(M4,bw64)", c2_s3="C(M2,bw128)")),
         _token(_logical("SYNC", "SPLIT", "T0", split_rule="HALF"), _profile(c2_dma_s1="IDMA", c2_dma_s3="IDMA", c2_s1="A(M8,bw32)", c2_s3="B(M4,bw64)", c3_dma_s1="XDMA", c3_dma_s3="XDMA", c3_s1="A(M8,bw32)", c3_s3="B(M4,bw64)")),
-        _token(_logical("SYNC", "SPLIT", "T0", split_rule="HALF"), _profile(c2_s1="C(M2,bw128)", c2_s1_cached=True, c2_s3="C(M2,bw128)", c2_s3_cached=True, c3_dma_s1="IDMA", c3_dma_s3="IDMA", c3_s1="A(M8,bw32)", c3_s3="B(M4,bw64)")),
-        _token(_logical("SYNC", "SPLIT", "T0", split_rule="HALF"), _profile(c2_s1="C(M2,bw128)", c2_s1_cached=True, c2_s3="C(M2,bw128)", c2_s3_cached=True, c3_s1="C(M2,bw128)", c3_s1_cached=True, c3_s3="C(M2,bw128)", c3_s3_cached=True)),
-        _token(_logical("SYNC", "PAIR", "T2", "T3"), _profile(c2_dma_s1="IDMA", c2_dma_s3="IDMA", c2_s1="B(M4,bw64)", c2_s3="B(M4,bw64)", c3_dma_s1="XDMA", c3_dma_s3="XDMA", c3_s1="B(M4,bw64)", c3_s3="B(M4,bw64)")),
         _token(_logical("SYNC", "PAIR", "T0", "T1"), _profile(c2_s1="C(M2,bw128)", c2_s1_cached=True, c2_s3="C(M2,bw128)", c2_s3_cached=True, c3_dma_s1="BOTH", c3_dma_s3="BOTH", c3_s1="C(M2,bw128)", c3_s3="C(M2,bw128)")),
-        _token(_logical("SYNC", "PAIR", "T2", "T3"), _profile(c2_dma_s1="IDMA", c2_dma_s3="IDMA", c2_s1="B(M4,bw64)", c2_s3="B(M4,bw64)", c3_dma_s1="XDMA", c3_dma_s3="IDMA", c3_s1="B(M4,bw64)", c3_s3="B(M4,bw64)")),
     )
 
 
@@ -481,7 +470,7 @@ def _runtime_token_bank(
 def _local_finish_key(
     state: reference.BeamState,
     action: reference.StageAction,
-) -> tuple[int, int, int, str]:
+) -> tuple[int, int, int]:
     child = reference.apply_action(state, action)
     starts = [
         int(start)
@@ -496,7 +485,6 @@ def _local_finish_key(
         max(ends),
         sum(ends),
         max(starts, default=0),
-        repr(action),
     )
 
 
@@ -520,10 +508,10 @@ def _materialize_candidate_banks(
 ]:
     """Return protected base, final scorer stream and physical slot count.
 
-    Each recovery profile has a fixed physical meaning.  Event-aligned start
-    alternatives are lowered to the earliest-finish realization inside that
-    profile.  Profiles in the same logical recovery family then share one
-    local finish-time reducer before entering the global bounded scorer.
+    Each recovery profile has a fixed physical meaning.  Event-aligned starts
+    are checked in release order and the first legal realization is retained.
+    Profiles in the same logical recovery family then share one local
+    finish-time reducer before entering the global bounded scorer.
     """
     base_tokens = _runtime_token_bank(state, COMPILED_TOKENS)
     base, _base_stats = policy.generate_direct_explicit_candidates(
@@ -537,7 +525,7 @@ def _materialize_candidate_banks(
         state,
         recovery_tokens,
         window=WINDOW,
-        start_policy="earliest_finish",
+        start_policy="earliest_start",
     )
     physical_count = len(base) + len(recovery)
     if physical_count > MAX_CONCRETE_CANDIDATES:
@@ -547,7 +535,10 @@ def _materialize_candidate_banks(
         )
 
     grouped: dict[tuple[str, ...], list[reference.StageAction]] = {}
-    for action in recovery:
+    # Fixed profile priority implements the final exact-tie decision.  Sorting
+    # once at the mirror boundary keeps the numeric reducer free of a synthetic
+    # string/order field; RTL uses the same decode order.
+    for action in sorted(recovery, key=repr):
         grouped.setdefault(_recovery_group_key(state, action), []).append(action)
     recovery_winners = [
         min(actions, key=lambda action: _local_finish_key(state, action))
@@ -591,7 +582,7 @@ def generate_candidate_slots(
     Slot IDs index the global scorer stream after recovery-family local
     reduction.  They are deterministic within a round but are not physical
     profile IDs and do not persist across modes.  ``candidate_count`` reports
-    the larger pre-reduction physical stream for the 24-entry budget audit.
+    the larger pre-reduction physical stream for the 18-entry budget audit.
     """
     _base, candidates, _physical_count = _materialize_candidate_banks(state)
     slots = []
@@ -626,19 +617,29 @@ def _choose_one_round(
             window=WINDOW,
         )
     )
+    base_keys = {
+        policy._explicit_child_key(reference.apply_action(state, candidate))
+        for candidate in base
+    }
+    recovery_candidates = [
+        candidate
+        for candidate in candidates
+        if policy._explicit_child_key(reference.apply_action(state, candidate))
+        not in base_keys
+    ]
+    # The selector is a deterministic left fold.  Folding the protected base
+    # once and then continuing from base_best is exactly equivalent to folding
+    # the complete base-plus-recovery stream, without evaluating every base
+    # candidate twice.
     score, _union_index, action, child, _selector = (
         policy.select_practical_probe_candidate(
             state,
-            list(candidates),
+            [base_action, *recovery_candidates],
             scorer=SCORER,
             sync_tiebreak="hot_cold",
             window=WINDOW,
         )
     )
-    base_keys = {
-        policy._explicit_child_key(reference.apply_action(state, candidate))
-        for candidate in base
-    }
     recovery_selected = policy._explicit_child_key(child) not in base_keys
     if recovery_selected and int(score[0]) + RECOVERY_MARGIN_CC > int(
         base_score[0]

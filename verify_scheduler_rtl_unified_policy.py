@@ -30,12 +30,12 @@ POSTFREEZE = tuple(
     for experts in (8, 32, 64)
 )
 DEFAULT_OUTPUTS = {
-    "proof65": HERE / "results/policy_search/scheduler_rtl_unified_65_v3.json",
-    "coverage30k": HERE / "results/policy_search/scheduler_rtl_unified_30k_v3.json",
-    "postfreeze": HERE / "results/policy_search/scheduler_rtl_unified_postfreeze_v3.json",
+    "proof65": HERE / "results/policy_search/scheduler_rtl_unified_65_v4.json",
+    "coverage30k": HERE / "results/policy_search/scheduler_rtl_unified_30k_v4.json",
+    "postfreeze": HERE / "results/policy_search/scheduler_rtl_unified_postfreeze_v4.json",
 }
 EXPECTED_CASES = {"proof65": 65, "coverage30k": 29_928, "postfreeze": 11_928}
-SCHEMA = "scheduler_rtl_unified_policy_validation_v2"
+SCHEMA = "scheduler_rtl_unified_policy_validation_v3"
 
 
 def _sha256(path: Path) -> str:
