@@ -1,8 +1,14 @@
 # Scheduler algorithm workspace
 
-This directory now has one active objective: derive a hardware-implementable
-scheduler from a stratified OLMoE-like Top-2 workload suite, while retaining the
-current RTL scheduler and the complete four-stage model as fixed baselines.
+The controlling RTL-oriented Python policy is now
+`scheduler_rtl_unified_policy.py` (`rtl-unified-t6b2-fixed13-v2`).  Its
+implementation contract and frozen evidence are in
+`OLMOE_BOUNDED_SCHEDULER_IMPLEMENTATION.md`.  It uses one top6+bottom2 path,
+at most 13 concrete slots, no candidate ROM/JSON, and no beam/SIM1 or legacy
+fallback path.
+
+The workflow below is retained as derivation history and proof provenance.  It
+is not the current RTL implementation specification.
 
 ## Active workflow
 
@@ -42,6 +48,8 @@ current RTL scheduler and the complete four-stage model as fixed baselines.
 ## Core models and reusable tools
 
 - `four_stage_scheduler.py`: complete explicit-DMA four-stage reference model.
+- `scheduler_rtl_unified_policy.py`: controlling bounded RTL mirror.
+- `verify_scheduler_rtl_unified_policy.py`: proof65/30K/post-freeze validator.
 - `run_four_stage_reference.py`: reference runner and action serialization.
 - `evaluate_top4_bottom2_directed.py`: directed case and lower-bound utilities.
 - `scheduler_hw_fixed_policy.py`: current hardware-oriented policy state model.

@@ -1173,6 +1173,10 @@ def _direct_materialize_explicit_token(
                 if split_ntok % 2:
                     return [], {"profile_attempts": 0, "low_level_variants": 0}
                 cuts = (split_ntok // 2,)
+            elif logical.split_rule == "BALANCED":
+                if split_ntok < 2:
+                    return [], {"profile_attempts": 0, "low_level_variants": 0}
+                cuts = (split_ntok // 2,)
             elif logical.split_rule.startswith("CUT"):
                 cut = int(logical.split_rule.removeprefix("CUT"))
                 if cut <= 0 or cut >= split_ntok or cut != min(cut, split_ntok - cut):
@@ -3174,14 +3178,15 @@ def bounded_head_hist_lpt_estimate(
     head: int = 5,
     tail_max_blocks: int = 4,
 ) -> int:
-    """Exact LPT from ``head`` descriptors and a bounded cold-tail histogram.
+    """Bounded LPT from ``head`` descriptors and four cold-tail counters.
 
     The histogram counters cover every remaining expert whose isolated task
     occupies one through four M blocks.  The visible head descriptors are
-    subtracted from those counters before the tail is scheduled.  An expert
-    larger than ``tail_max_blocks`` is therefore legal only while it remains
-    in the visible head; otherwise the workload-class contract is rejected
-    instead of silently using a hidden descriptor.
+    subtracted before those bins are scheduled in descending order.  Any
+    remaining work above four blocks is represented by one maintained
+    aggregate-work scalar and balanced after the exact histogram.  Hardware
+    therefore needs no hidden descriptor and the scorer remains defined for
+    distributions outside the original OLMoE proof envelope.
     """
     if head <= 0:
         raise ValueError("head must be positive")
@@ -3198,21 +3203,34 @@ def bounded_head_hist_lpt_estimate(
             tail_hist[blocks - 1] -= 1
     if min(tail_hist, default=0) < 0:
         raise AssertionError("negative cold-tail histogram count")
-    tail_count = len(state.remaining) - len(head_entries)
-    if sum(tail_hist) != tail_count:
-        raise AssertionError(
-            "top5+hist4 contract violated: an unseen tail expert exceeds four blocks"
-        )
+    tail_best_work = counters.best_work_cc - sum(
+        reference._best_task_time(int(ntok)) for _eid, ntok in head_entries
+    )
 
     loads = [int(state.c2.task_end), int(state.c3.task_end)]
     for _eid, ntok in head_entries:
         target = 0 if loads[0] <= loads[1] else 1
         loads[target] += reference._best_task_time(int(ntok))
     phase_block_cc = reference._best_task_time(reference.FULL_M_DIM)
+    histogram_work = sum(
+        count * blocks * phase_block_cc
+        for blocks, count in enumerate(tail_hist, start=1)
+    )
+    overflow_work = tail_best_work - histogram_work
+    if overflow_work < 0:
+        raise AssertionError("negative aggregate tail work")
     for blocks in range(tail_max_blocks, 0, -1):
         for _ in range(tail_hist[blocks - 1]):
             target = 0 if loads[0] <= loads[1] else 1
             loads[target] += blocks * phase_block_cc
+    if overflow_work:
+        low = 0 if loads[0] <= loads[1] else 1
+        high = 1 - low
+        fill = min(loads[high] - loads[low], overflow_work)
+        loads[low] += fill
+        overflow_work -= fill
+        loads[low] += overflow_work // 2
+        loads[high] += overflow_work - overflow_work // 2
     return max(int(state.f_score), max(loads))
 
 

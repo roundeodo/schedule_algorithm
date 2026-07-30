@@ -1,320 +1,312 @@
-# Top6+bottom2 joint scheduler implementation contract
+# Unified top6+bottom2 RTL scheduler contract
 
-## 1. Frozen v4 decision
+Status: controlling Python-to-RTL contract, frozen on 2026-07-30.
 
-The final Python policy ID is
-`rtl-adaptive-t6b2-protected-b0-certified-fixed14-union-v4`.
+Policy ID: `rtl-unified-t6b2-fixed13-v2`.
 
-The observable remaining-expert window is fixed as:
+The normative Python entry point is `scheduler_rtl_unified_policy.py`.  The
+policy keeps the existing M-outer four-stage transition semantics and changes
+only the observable window, candidate cases, and continuation comparator.  It
+does not implement the separate N-outer experiment.
 
-- `T0..T5`: the six hottest remaining experts;
-- `B0..B1`: the two coldest remaining experts, with `B0` the coldest;
-- duplicate identities are suppressed when fewer than eight experts remain.
+## 1. Design boundary
 
-The execution model remains the existing M-outer four-stage model. One policy
-invocation selects one current-round action. The implementation does not run
-beam search, recursively generate a child round, execute SIM1, scan all
-remaining descriptors, or use a trained model.
+One invocation makes one current-round decision:
 
-Every mode preserves the existing sequential RTL dataflow:
+1. read the C2/C3 four-stage snapshots and `T0..T5,B0..B1` window;
+2. decode legal candidate cases for the current mode;
+3. lower every candidate to an exact S1/S2/S3/S4 and explicit-DMA action;
+4. apply the exact child transition;
+5. compare candidates with one fixed integer comparison policy;
+6. commit one winner, update counters/window, and repeat in the next round.
 
-1. read the current `T0..T5,B0,B1` state;
-2. emit one fixed candidate at a time;
-3. calculate the exact S1/S2/S3/S4 and DMA timing for that candidate;
-4. calculate its integer score;
-5. update one best-candidate register;
-6. commit one winner and update the state/window.
+The hard limit is 13 concrete candidate slots per state.  A sequential RTL
+implementation needs one current-candidate register and one best-candidate
+register; it does not need 13 copies of the timing/scoring datapath.
 
-Authoritative files are:
+The final path contains none of the following:
 
-- final entry point: `scheduler_rtl_adaptive_olmoe_policy.py`;
-- adaptive timing and protected selection: `scheduler_rtl_adaptive_prefetch_policy.py`;
-- fixed RTL-style candidate generator: `scheduler_hw_fixed_policy.py`;
-- bounded OLMoE scorer/control: `scheduler_olmoe_bounded_policy.py`;
-- fixed14 OLMoE token ROM:
-  `results/policy_search/olmoe_t5b1_hist4_bounded14_token_bank_v1.json`;
-- 65-case audit:
-  `results/policy_search/scheduler_adaptive_t6b2_joint_union_65_v4.json`;
-- 29,928-case paired audit:
-  `results/policy_search/scheduler_adaptive_t6b2_joint_union_30k_v4.json`;
-- first-divergence causal audit:
-  `results/policy_search/scheduler_adaptive_t6b2_first_divergence_30k_v1.json`;
-- post-freeze 11,928-case audit:
-  `results/policy_search/scheduler_adaptive_t6b2_postfreeze_11928_v4.json`;
-- post-freeze generation manifest:
-  `results/policy_search/scheduler_adaptive_t6b2_postfreeze_inputs_v4.json`.
+- runtime JSON/ROM candidate tables;
+- an initial-distribution classifier or OLMoE-only mode bit;
+- a legacy-policy fallback path;
+- beam search, rollout, child-round expansion, or SIM1;
+- standalone S4 prefetch candidates;
+- training coefficients or experimental scorer switches.
 
-The ROM filename contains `t5b1` because it records the minimum selector set
-of that earlier ablation. The hardware interface is uniformly `top6+bottom2`;
-each mode may leave a visible selector unused.
+The Python tuple constants are source-level encodings of combinational `case`
+branches.  They do not imply a hardware ROM and require zero ROM data bits.
 
-## 2. Why a larger window did not initially improve every case
+## 2. Runtime state
 
-Candidate-space monotonicity and closed-loop policy monotonicity are different
-claims.
+### 2.1 Descriptor window
 
-If the old candidate set is a subset of the new set and every candidate is
-ranked by its exact final cost, the best reachable cost cannot increase. The
-current RTL scorer is a finite continuation estimate. A new candidate can
-therefore receive a better approximate score and still produce a worse final
-schedule.
+Remaining experts stay sorted by descending token count and then deterministic
+expert-ID order.  The observable window is:
 
-The complete 29,928-case ablations demonstrated this directly:
+- `T0..T5`: first six remaining descriptors;
+- `B0`: coldest remaining descriptor;
+- `B1`: second-coldest remaining descriptor.
 
-| T6+B2 control | Better | Equal | Worse |
-|---|---:|---:|---:|
-| globally use legacy control | 1,202 | 22,955 | 5,771 |
-| globally rescore with continuation | 3,009 | 25,339 | 1,580 |
-| preserve old winner, SYNC addition only | 191 | 29,737 | 0 |
-| preserve old winner, initial head-critical rule | 299 | 29,606 | 23 |
-| final protected B0 rule | 295 | 29,633 | 0 |
+When the head and bottom overlap, duplicate expert IDs are suppressed before
+candidate lowering.  Candidate slot order after legality filtering and child
+deduplication is architectural: `candidate_slot = 0..candidate_count-1`.
+`ScheduleStep.candidate_slot` records that index for RTL lockstep.
 
-All 23 losses of the initial head-critical rule occurred in `ONE_IDLE` states
-with exactly three remaining experts. Twenty-two selected `B1@release0`; one
-selected `B0@release1`. In the same audit, protected `B0@release0` produced 104
-improvements and no loss, while protected `SYNC T0+B0` produced 191
-improvements and no loss. The final rule therefore uses fixed candidate-valid
-bits, not token-count thresholds fitted to individual distributions.
+The scheduler is a slave and cannot fetch descriptors.  A deployment therefore
+still needs a two-sided refill protocol.  The minimum compatible protocol keeps
+monotone head and tail cursors, reports separate consumed head/bottom counts,
+and suppresses duplicate physical indices when the cursors meet.  Software
+does not need to mirror every current window identity, but it must supply the
+correct next descriptors for each side.  This refill protocol is outside the
+current Python policy and must be verified separately before claiming an
+end-to-end RTL deployment.
 
-## 3. Runtime mode selection
+### 2.2 Aggregate counters
 
-Mode selection is fixed at initialization and does not change between rounds.
+The scorer does not scan unseen descriptors.  It uses counters initialized
+once and decremented on every committed expert or split:
 
-### 3.1 Certified OLMoE mode
+- `remaining_count`;
+- `remaining_token_sum`;
+- `remaining_odd_count`;
+- `remaining_block_sum`, where `blocks = ceil(ntok/2)`;
+- `remaining_best_work`;
+- four histogram counts for one-, two-, three-, and four-block experts.
 
-Use the fixed14/head5-hist4 policy when all conditions hold:
+Any tail work above four blocks is represented by
+`remaining_best_work - visible_head_work - histogram_work`.  It is balanced as
+one aggregate scalar, so no hidden middle descriptor is read.
 
-- total configured experts is 64;
-- both initial cache IDs are invalid;
-- total routed assignments is 140;
-- active expert count is in `[29,57]`;
-- experts with at most two assignments, including zero-load experts, is in
-  `[40,49]`;
-- `T0.ntok <= 34`;
-- every expert below the first five has at most seven assignments;
-- the head5+hist4 scorer contract is valid.
+Widths must be derived from the configured `E_MAX`, `NTOK_MAX`, and
+`TOTAL_TOKEN_MAX`; they must not silently saturate.  For example,
+`remaining_count` needs `ceil(log2(E_MAX+1))` bits and each histogram counter
+uses the same width.
 
-These comparisons form the inclusive feature envelope of the frozen 65-case
-proof set. They are not a distribution LUT or trained classifier. The
-global-optimality claim applies to the audited 65 cases only.
+## 3. Candidate decode cases
 
-This mode uses the fixed14 candidate bank, head5+hist4 scorer, bounded local
-lowering, and explicit `S4PF=OFF` profiles. It sends at most six candidates to
-the bounded scorer on the 65 audited cases.
+Notation below is `S1/S3 ; DMA-S1/DMA-S3 ; S2PF`.  `A`, `B`, and `C` are the
+existing M8/bw32, M4/bw64, and M2/bw128 shapes.  `I`, `X`, and `BOTH` denote
+iDMA, xDMA, and both DMA lanes.
 
-### 3.2 Generic protected T6+B2 mode
+Only cases belonging to the current mode are decoded.  Cluster-reflected
+single cases share one logical branch in RTL even though the Python constants
+contain C2 and C3 endpoint forms.
 
-Every non-certified input uses the protected path. There is no longer an
-initial `T0<=4` gate and no bit-exact fallback region.
+### 3.1 `ONE_IDLE`
 
-At every round the policy first reproduces the old adaptive winner exactly.
-The final generic candidate bank then exposes at most one additional candidate:
+The legal idle cluster receives one of three selector/profile families:
 
-| Current mode | Additional candidate | Physical path |
+| Selector | Profile | Purpose |
 |---|---|---|
-| `SYNC` | pair `T0+B0` | existing adaptive pair/shape/S2PF/DMA lowering |
-| `ONE_IDLE` | single `B0` at release point 0 | existing C/C single lowering and eager S2PF/S4PF rules |
+| `B0` | `C/C ; BOTH/BOTH ; OFF` | fit one cold expert into available slack |
+| `T0` | `B/B ; BOTH/OFF ; BOTH` | advance the hottest expert with S2PF |
+| `T3` | `B/B ; BOTH/OFF ; BOTH` | preserve plateau/parity alternatives |
 
-`B1` and later release points were retained during ablation, but the final
-generic valid mask rejects them unconditionally. They are therefore removed
-from `generate_top6_bottom2_protected_successors` and consume no final generic
-scoring slots. `B1` remains visible because the certified fixed14 mode uses it.
+The `T0/T3` S3 weight is marked resident only when the S2PF interval completes
+legally.  No eager S4PF is inserted.
 
-The additional candidate replaces the old winner only when its fixed
-acceptance rule succeeds. Otherwise the exact old transition is committed.
+### 3.2 `SYNC`
 
-## 4. Generic score and acceptance contract
+Six pair families are decoded:
 
-The existing integer continuation function is:
+| Family | C2 profile | C3 profile |
+|---|---|---|
+| `B0 + T0` | `A/B ; I/OFF ; X` | `B/B ; X/I ; OFF` |
+| `T0 + T1`, no PF | `B/B ; I/I ; OFF` | `B/B ; X/X ; OFF` |
+| `T0 + T1`, C2 PF | `B/B ; I/OFF ; I` | `B/B ; X/I ; OFF` |
+| `T0 + T4` | `A/B ; I/OFF ; X` | `B/B ; X/I ; OFF` |
+| `T1 + T2` | `B/B ; I/OFF ; I` | `B/B ; X/OFF ; X` |
+| `T2 + T3` | `B/B ; I/OFF ; I` | `B/B ; X/OFF ; X` |
+
+Selector aliases, illegal DMA overlaps, impossible cache flags, and identical
+child states are removed.  Cache/residency observations can create distinct
+legal physical realizations; every realization consumes a concrete slot.
+
+### 3.3 `TERMINAL`
+
+The remaining expert has three possible concrete cases:
+
+- one C2 `C/C ; BOTH/BOTH` single;
+- one C3 `C/C ; BOTH/BOTH` single;
+- one balanced split using `B/B`, with floor/ceil token halves and dedicated
+  C2-iDMA/C3-xDMA lanes.
+
+The balanced split is an exact current-round action.  It is not SIM1 or
+lookahead and is legal for odd token counts because the two halves still sum
+to the original count.
+
+## 4. Exact transition and score
+
+Every candidate first passes the unchanged explicit-DMA four-stage legality
+model.  In particular, selected token counts are conserved; starts cannot
+precede cluster release; cache flags must match residency at the proposed
+start; S2PF is legal only for the selected Down weight; and intervals using
+the same DMA lane cannot overlap.
+
+The child path bound is monotone:
 
 ```text
-continuation(child) =
-  min(aggregate_greedy(child),
-      LPT(first four remaining experts) + balanced aggregate tail)
+child.f = max(parent.f,
+              committed_finish,
+              compute_capacity_LB,
+              hottest_release_chain_LB,
+              hottest_critical_chain_LB,
+              mandatory_DMA_capacity_LB)
 ```
 
-The first four visible jobs are placed in descending token order onto the
-currently earlier cluster. Work below the first four is represented by one
-integer sum and divided between the two loads. This calculation does not
-generate another action.
-
-For `SYNC T0+B0`, accept the additional candidate only if:
+The base integer key is formed from:
 
 ```text
-continuation(old_winner) - continuation(added) >= 1 tick
+(child.f,
+ head5_hist4_LPT(child),
+ compute_capacity_LB,
+ mandatory_DMA_capacity_LB,
+ mode_specific_current_round_fields,
+ candidate_slot)
 ```
 
-For `ONE_IDLE B0@release0`, all conditions must hold:
+`head5_hist4_LPT` places `T0..T4` in descending order onto the currently
+earlier cluster, then places histogram bins 4,3,2,1, and finally balances the
+aggregate overflow work.  It estimates continuation work but never generates
+a future action.
 
-```text
-max(added_child.c2.task_end, added_child.c3.task_end)
-    <= current_busy_cluster.task_end
+The comparator has one frozen deterministic implementation,
+`HEAD5_HIST4_PAIRWISE_SCORER`.  Its local tie overrides use only the current
+mode, `T0..T5,B0..B1`, the counters above, exact child endpoints, S2PF count,
+and lower-bound fields.  The five override classes are:
 
-min(added_child.c2.task_end, added_child.c3.task_end)
-    + best_task(added_child.remaining.T0)
-    >= continuation(added_child)
+- `ONE_IDLE` progress under a small remaining-work/odd-tail condition;
+- hot-head preservation in `SYNC` when `T0 >= 2*T1` and the cold population is
+  large;
+- long plateau progress when cluster release skew is three ticks;
+- short-tail plateau progress when release skew is six ticks;
+- large-slack head fill for 8--16 remaining experts.
 
-continuation(old_winner) - continuation(added_child) >= 1 tick
-```
+These are current-state tie rules, not an initial-distribution gate and not a
+second scheduler.  Exact normative comparisons are in
+`evaluate_olmoe_fixed_token_banks.py::select_practical_probe_candidate`; the
+RTL implementation must reproduce them in source order because the relation
+is a sequential pairwise reducer, not an unordered scalar sort.
 
-The first condition prevents the cold fill from extending the existing busy
-interval. The second prevents postponing the remaining hot head when that head
-lies on the estimated critical completion chain. The third requires a strict
-one-tick continuation advantage.
+All timing and score arithmetic is integer.  One tick is 11,264 cycles in the
+current model.  No multiplier is required by the fixed thresholds: constants
+such as 2, 3, 6, 11, 32, 84, 102, and 115 can be implemented with shifts,
+adds, and constant comparisons.
 
-Tie-breaks never allow an added candidate to replace the old winner. This is
-the source of the finite-set zero-regression property; it is not a proof over
-all possible distributions.
+## 5. Why there is no generic safety candidate
 
-## 5. Certified fixed14 candidate bank
+An earlier prototype exposed one apparent safety slot, but constructed that
+slot by running the complete reference `gen_stage_actions` menu and selecting
+its earliest-finishing SINGLE internally.  Although the resulting list never
+exceeded 13 entries, the hidden micro-action search was not a truthful fixed
+RTL candidate budget.  That prototype is rejected and is not present in the
+controlling source.
 
-Notation is `S1/S3 ; DMA-S1/DMA-S3 ; S2PF`. `-` means that the cluster is idle
-for that entry.
+Removing it preserves 65/65 certified OLMoE optima and the strict OLMoE gain,
+but reduces performance on broad random/cache-heavy inputs.  This is an
+intentional, measured complexity/performance choice rather than an omitted
+optimization.  Reintroducing that behavior would require either counting its
+shape/lane alternatives as real candidate slots or specifying and costing a
+separate local selector.
 
-| ID | Mode | Selector | C2 profile | C3 profile |
-|---:|---|---|---|---|
-| 0 | `ONE_IDLE` | `B0` | - | `C/C; BOTH/BOTH; OFF` |
-| 1 | `ONE_IDLE` | `B0` | `C/C; BOTH/BOTH; OFF` | - |
-| 2 | `ONE_IDLE` | `T0` | `B/B; BOTH/OFF; BOTH` | - |
-| 3 | `ONE_IDLE` | `T0` | - | `B/B; BOTH/OFF; BOTH` |
-| 4 | `ONE_IDLE` | `T3` | `B/B; BOTH/OFF; BOTH` | - |
-| 5 | `ONE_IDLE` | `T3` | - | `B/B; BOTH/OFF; BOTH` |
-| 6 | `SYNC` | `B0,T0` | `A/B; IDMA/OFF; XDMA` | `B/B; XDMA/IDMA; OFF` |
-| 7 | `SYNC` | `T0,T1` | `B/B; IDMA/IDMA; OFF` | `B/B; XDMA/XDMA; OFF` |
-| 8 | `SYNC` | `T0,T1` | `B/B; IDMA/OFF; IDMA` | `B/B; XDMA/IDMA; OFF` |
-| 9 | `SYNC` | `T0,T4` | `A/B; IDMA/OFF; XDMA` | `B/B; XDMA/IDMA; OFF` |
-| 10 | `SYNC` | `T1,T2` | `B/B; IDMA/OFF; IDMA` | `B/B; XDMA/OFF; XDMA` |
-| 11 | `SYNC` | `T2,T3` | `B/B; IDMA/OFF; IDMA` | `B/B; XDMA/OFF; XDMA` |
-| 12 | `TERMINAL` | `T0` | `C/C; BOTH/BOTH; OFF` | - |
-| 13 | `TERMINAL` | `T0` | - | `C/C; BOTH/BOTH; OFF` |
+## 6. Verification and claims
 
-Shape A/B/C are M8/bw32, M4/bw64, and M2/bw128. The bank contains no
-standalone prefetch action, S4PF action, WAIT-PAIR, SIM1, runtime rank loop, or
-dynamic candidate expansion.
+Authoritative validation outputs are:
 
-The certified scorer maintains `remaining_count`, `remaining_token_sum`,
-`remaining_odd_count`, `remaining_shape_c_block_sum`, four histogram counters,
-and the existing pathmax/lower-bound state. It places visible `T0..T4` by LPT,
-then drains histogram bins 4,3,2,1. The fixed pairwise conditions use only the
-current mode, visible window, maintained counters, child score fields, and
-integer thresholds.
+- `results/policy_search/scheduler_rtl_unified_65_v1.json`;
+- `results/policy_search/scheduler_rtl_unified_30k_v1.json`;
+- `results/policy_search/scheduler_rtl_unified_postfreeze_v1.json`.
 
-## 6. RTL impact
+The verifier records input and source SHA-256 hashes, supports checkpoint
+resume, and stores a complete selected-slot/action trace for the 65 proof
+cases.  Every final history is independently replayed through the explicit-DMA
+reference.
 
-Required common state/interface changes are:
+The 65-case claim has two parts:
 
-- maintain `T0..T5,B0,B1` descriptors;
-- suppress duplicate selectors in short tails;
-- select and retain one initialization mode bit;
-- add selector encodings for `B0/B1`.
+1. every closed-loop action came from the bounded candidate stream, so the
+   stream contains an optimal path for all 65 cases;
+2. the frozen comparator selected that path and reached the certified
+   `LB=UB` makespan for all 65 cases.
 
-Required generic-control changes are:
+Thus both candidate loss and scoring loss are zero on the certified set.  The
+selected optimum need not be action-for-action identical to an older stored
+certificate; equality is established by legal replay and the certified lower
+bound.
 
-- one fixed mode-specific candidate-valid slot;
-- one register for the old winner's continuation score;
-- comparisons for busy-slack fit, head-finish, and one-tick advantage;
-- reuse the existing continuation arithmetic in `ONE_IDLE` states.
+The 29,928 and post-freeze sets do not contain per-case four-stage optimum
+certificates.  Their deltas against the adaptive policy are therefore paired
+policy comparisons, not a decomposition into candidate and scoring regret.
+The final report must keep this distinction.
 
-The generic candidate bank is structurally the old bank plus at most one
-candidate. The observed maximum materialized count is 13 on both the 29,928
-and post-freeze 11,928 sets. With a sequential scorer, the worst scheduling
-latency increment is at most one candidate-scoring iteration per decision.
-No parallel evaluator, second reducer, second commit path, beam queue,
-multiplier, learned coefficient, or new timing model is required.
+Final same-input results versus the adaptive Python baseline are:
 
-The certified mode additionally requires the fixed14 physical profile ROM,
-four small histogram counters, and its fixed comparison control. The low-level
-union generator materializes at most 15 endpoint-distinct transitions in the
-65-case audit; the bounded certified scorer sees at most six.
+| Suite/bucket | Cases | Better / equal / worse | Aggregate delta | Max candidates |
+|---|---:|---:|---:|---:|
+| certified OLMoE | 65 | 64 / 1 / 0 | -15.5871% | 6 |
+| coverage30k overall | 29,928 | 5,867 / 17,758 / 6,303 | +2.9428% | 12 |
+| coverage30k strict OLMoE | 307 | 241 / 11 / 55 | -5.9884% | 10 |
+| post-freeze overall | 11,928 | 2,088 / 7,369 / 2,471 | +2.8175% | 12 |
+| post-freeze strict OLMoE | 88 | 68 / 1 / 19 | -5.4978% | 10 |
 
-Area, Fmax, and cycle-accurate RTL latency have not yet been synthesized. The
-complexity statements above are structural bounds from the frozen Python
-model, not post-synthesis measurements.
+Negative delta is an improvement.  The conclusion is therefore workload
+specific: this fixed bank is strong on the intended E64 hot-head/cold-tail
+class and reaches every certified target, but it is not a drop-in dominance
+replacement for the adaptive policy on broad random/cache-heavy traffic.  An
+RTL or thesis claim must state that boundary explicitly.
 
-The scheduler remains a slave. Software or the existing upstream controller
-must refill the `top6+bottom2` window. The Python policy does not define or
-validate that refill protocol.
+## 7. RTL cost statement
 
-## 7. Verification evidence
+Structural additions relative to the existing four-stage timing engine are:
 
-### 7.1 Certified 65-case OLMoE set
+- storage/refill support for `top6+bottom2` physical descriptors;
+- the aggregate counters and four histogram counters;
+- combinational decoding for the mode-specific cases above;
+- head5/hist4 continuation arithmetic and the frozen pairwise comparisons;
+- a 4-bit candidate-slot counter, one best-score register, and one best-action
+  register.
 
-| Metric | Result |
-|---|---:|
-| certified reference with `LB=UB` | 65/65 |
-| final policy reaches certified optimum | 65/65 |
-| low-level best-history coverage | 65/65 |
-| better / equal / worse than old adaptive | 64 / 1 / 0 |
-| old adaptive optimum cases | 1/65 |
-| old adaptive cumulative gap | 1,427 ticks |
-| final cumulative gap | 0 ticks |
-| maximum certified scorer candidates | 6 |
-| maximum low-level union transitions | 15 |
+The hard slot budget is 13.  The final full validations observed at most 12;
+the remaining code point is headroom, not a hidden action.  A sequential
+implementation therefore needs at most 12 candidate-evaluation iterations on
+the validated data and must assert if an unsupported state tries to emit more
+than 13.
 
-The audit checks both final closed-loop makespan and replay of the certified
-best history through the RTL-style generator. A matching makespan alone is not
-used as candidate-coverage proof.
+This policy has fewer bounded candidate slots than an unconstrained reference
+search, but its scorer is more complex than the deployed adaptive heuristic.
+No area, Fmax, or cycle count should be claimed until synthesis and RTL
+lockstep are complete.
 
-### 7.2 Original complete 29,928 paired set
+## 8. Required RTL verification order
 
-| Partition label | Cases | Better | Equal | Worse | Aggregate delta |
-|---|---:|---:|---:|---:|---:|
-| discovery | 17,959 | 188 | 17,771 | 0 | -0.016775% |
-| validation | 5,987 | 54 | 5,933 | 0 | -0.014313% |
-| blind_test | 5,982 | 53 | 5,929 | 0 | -0.012380% |
-| total | 29,928 | 295 | 29,633 | 0 | -0.015406% |
+1. Compare Python and RTL candidate count, slot ID, and serialized action for
+   every round of all 65 traces.
+2. Compare every candidate's exact child endpoints and DMA legality, not only
+   the selected winner.
+3. Compare score fields and pairwise winner updates slot by slot.
+4. Replay the selected RTL history in the Python explicit-DMA checker.
+5. Run the 29,928 and post-freeze suites with identical input/cache manifests.
+6. Synthesize only after lockstep passes; report area, Fmax, decision latency,
+   and the two-sided refill storage separately.
 
-The final rule was derived after examining affected cases across this dataset.
-The `blind_test` label must therefore not be presented as an untouched blind
-result for v4. This audit is a complete same-input regression test.
-
-The dataset contains no case selected by the 140-assignment certified gate;
-all 29,928 cases exercise the generic protected path.
-
-The separate first-divergence audit forces each selected child to finish under
-the old policy. It confirms that all 295 final first actions are beneficial,
-with 191 `SYNC T0+B0` actions and 104 `ONE_IDLE B0@release0` actions; no final
-first action has positive rollout delta. It also reproduces all 23 rejected
-head-critical losses and their exact selector classification.
-
-### 7.3 Post-freeze independent set
-
-After source and the 29,928 result were frozen, a new coverage-balanced set was
-generated once with seed `20260730` and bound to the frozen result SHA-256. No
-policy parameter was changed after observing it.
-
-| Expert count | Cases | Better | Equal | Worse | Aggregate delta |
-|---|---:|---:|---:|---:|---:|
-| 8 | 3,976 | 31 | 3,945 | 0 | -0.014073% |
-| 32 | 3,976 | 56 | 3,920 | 0 | -0.021899% |
-| 64 | 3,976 | 54 | 3,922 | 0 | -0.021250% |
-| total | 11,928 | 141 | 11,787 | 0 | -0.019200% |
-
-This is the untouched post-freeze validation of the generic rule. It remains a
-finite constrained-random coverage set, not a measured router probability
-distribution and not a mathematical proof for all inputs.
-
-## 8. Reproduction
+## 9. Reproduction
 
 ```bash
 cd /esat/studscratch/r1015673/Thesis/Idea_Model
 
 python3 -m py_compile \
-  scheduler_hw_fixed_policy.py \
-  scheduler_rtl_adaptive_prefetch_policy.py \
-  scheduler_rtl_adaptive_olmoe_policy.py \
-  audit_scheduler_t6b2_certified_union.py \
-  compare_scheduler_adaptive_olmoe_30k.py
+  four_stage_scheduler.py \
+  evaluate_olmoe_fixed_token_banks.py \
+  scheduler_rtl_unified_policy.py \
+  verify_scheduler_rtl_unified_policy.py
 
-python3 audit_scheduler_t6b2_certified_union.py
+python3 verify_scheduler_rtl_unified_policy.py \
+  --suite proof65 --workers 24 --checkpoint-every 65
 
-python3 analyze_t6b2_protected_first_divergence.py --workers 24
+python3 verify_scheduler_rtl_unified_policy.py \
+  --suite coverage30k --workers 24 --checkpoint-every 1000
 
-python3 compare_scheduler_adaptive_olmoe_30k.py \
-  --workers 24 \
-  --checkpoint-every 1000 \
-  --progress-every 1000
-
+# Recreate the deterministic post-freeze inputs if /tmp was cleared.
 python3 generate_scheduler_strategy_coverage.py \
   --seed 20260730 \
   --cases-per-e 4000 \
@@ -327,15 +319,11 @@ python3 generate_scheduler_strategy_coverage.py \
   --policy-freeze-manifest \
     results/policy_search/scheduler_adaptive_t6b2_joint_union_30k_v4.json
 
-python3 compare_scheduler_adaptive_olmoe_30k.py \
-  --input /tmp/scheduler_t6b2_postfreeze_v4/scheduler_t6b2_postfreeze_E8.json \
-  --input /tmp/scheduler_t6b2_postfreeze_v4/scheduler_t6b2_postfreeze_E32.json \
-  --input /tmp/scheduler_t6b2_postfreeze_v4/scheduler_t6b2_postfreeze_E64.json \
-  --expected-cases 11928 \
-  --workers 24 \
-  --out results/policy_search/scheduler_adaptive_t6b2_postfreeze_11928_v4.json
+python3 verify_scheduler_rtl_unified_policy.py \
+  --suite postfreeze --workers 24 --checkpoint-every 1000
 ```
 
-The JSON audits record input and source SHA-256 values. Any edit to a hashed
-source invalidates the corresponding manifest and requires the audits to be
-rerun.
+Completion of a process alone is not acceptance.  The result must have
+`complete=true`, the expected case count, matching source/input hashes,
+`candidate_count_max <= 13`, explicit-DMA replay success, and 65/65 certified
+optima.
