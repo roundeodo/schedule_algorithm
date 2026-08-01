@@ -1,11 +1,13 @@
 # Scheduler algorithm workspace
 
-The controlling RTL-oriented Python policy is now
-`scheduler_rtl_unified_policy.py` (`rtl-unified-t6b2-fixed13-v2`).  Its
-implementation contract and frozen evidence are in
-`OLMOE_BOUNDED_SCHEDULER_IMPLEMENTATION.md`.  It uses one top6+bottom2 path,
-at most 13 concrete slots, no candidate ROM/JSON, and no beam/SIM1 or legacy
-fallback path.
+The controlling RTL-oriented Python policy is
+`scheduler_rtl_distilled_policy.py`
+(`bounded-distilled-top5-bottom1`).  Its normative method contract and RTL
+handoff checklist are `BOUNDED_DISTILLED_SCHEDULER.md` and
+`RTL_BOUNDED_DISTILLED_SCHEDULER_CHECKLIST.md`.  It uses a top5+bottom1
+descriptor window, 32 hard-wired physical profiles, at most six logical
+candidates per round, one continuation comparator, and no base/recovery,
+beam/SIM1, standalone S4PF, or runtime policy table.
 
 The workflow below is retained as derivation history and proof provenance.  It
 is not the current RTL implementation specification.

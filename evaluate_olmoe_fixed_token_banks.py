@@ -1544,6 +1544,22 @@ def generate_direct_explicit_candidates(
     return list(emitted.values()), stats
 
 
+def generate_direct_explicit_candidates_with_sources(
+    state: reference.BeamState,
+    tokens: tuple[ExplicitCandidateToken, ...],
+    window: tuple[int, int] = EXPLICIT_WINDOW,
+    start_policy: str = "all",
+) -> tuple[list[tuple[reference.StageAction, tuple[int, ...]]], dict]:
+    """Emit candidates together with fixed-profile decode source indices."""
+    emitted, source_indices, stats = _direct_explicit_candidate_map(
+        state, tokens, window, start_policy
+    )
+    return [
+        (action, tuple(sorted(source_indices[key])))
+        for key, action in emitted.items()
+    ], stats
+
+
 def generate_explicit_union_candidates(
     state: reference.BeamState,
     tokens: tuple[ExplicitCandidateToken, ...],
@@ -3435,6 +3451,8 @@ BOUNDED_PAIRWISE_SCORER = "lb_f_head8_compute_dma_regime_pairwise_v1"
 HEAD5_HIST4_PAIRWISE_SCORER = (
     "lb_f_head5_hist4_compute_dma_regime_pairwise_v1"
 )
+BOUNDED_CONTINUATION_SCORER = HEAD5_HIST4_PAIRWISE_SCORER
+BOUNDED_CONTINUATION_WINDOW = (5, 1)
 BOUNDED_PAIRWISE_SCORERS = {
     BOUNDED_PAIRWISE_SCORER,
     HEAD5_HIST4_PAIRWISE_SCORER,
@@ -3939,6 +3957,33 @@ def select_practical_probe_candidate(
         "tail_plateau_gate_state": tail_plateau_gate_state,
         "slack_fill_gate_state": slack_fill_gate_state,
     }
+
+
+def select_bounded_continuation_winner(
+    state: reference.BeamState,
+    candidates: list[reference.StageAction],
+    *,
+    window: tuple[int, int] = EXPLICIT_WINDOW,
+) -> tuple[tuple, int, reference.StageAction, reference.BeamState, dict]:
+    """Select one global winner with the frozen bounded continuation comparator.
+
+    This is the final RTL-facing entry point.  All candidates enter the same
+    comparator and exactly one action is returned; candidate provenance is not
+    an input.  The compatibility function above is retained because prior
+    experiment manifests refer to its historical scorer identifier.
+    """
+    if tuple(window) != BOUNDED_CONTINUATION_WINDOW:
+        raise ValueError(
+            "bounded continuation winner requires the complete "
+            "top5+bottom1 window"
+        )
+    return select_practical_probe_candidate(
+        state,
+        candidates,
+        scorer=BOUNDED_CONTINUATION_SCORER,
+        sync_tiebreak="hot_cold",
+        window=window,
+    )
 
 
 def run_practical_probe_case(
