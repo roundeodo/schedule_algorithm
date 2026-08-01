@@ -1,6 +1,10 @@
 # Unified top6+bottom2 protected18 scheduler contract
 
-Status: controlling Python policy contract, frozen on 2026-07-30.
+> Archived baseline: this document freezes v4 evidence only.  It is not the
+> final implementation contract.  The controlling contract is now
+> `BOUNDED_DISTILLED_SCHEDULER.md`.
+
+Status: frozen v4 baseline contract, frozen on 2026-07-30.
 
 Policy ID: `rtl-unified-t6b2-protected18-v4`.
 

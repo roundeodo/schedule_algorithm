@@ -1,8 +1,8 @@
 # OLMoE 特征分布调度器升级固定计划
 
 > 状态：已完成的推导/证据日志，不是当前 RTL 规范。当前唯一控制规范为
-> `OLMOE_BOUNDED_SCHEDULER_IMPLEMENTATION.md`，入口为
-> `scheduler_rtl_unified_policy.py`。
+> `BOUNDED_DISTILLED_SCHEDULER.md`，入口为
+> `scheduler_rtl_distilled_policy.py`。
 
 ## 固定目标
 

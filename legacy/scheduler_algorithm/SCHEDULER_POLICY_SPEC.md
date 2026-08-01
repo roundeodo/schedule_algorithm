@@ -2,8 +2,8 @@
 
 > Archived baseline. This document preserves HW-v2 and earlier derivation
 > evidence. Do not implement it as the current target. The controlling policy
-> is `scheduler_rtl_unified_policy.py`, specified by
-> `OLMOE_BOUNDED_SCHEDULER_IMPLEMENTATION.md`.
+> is `scheduler_rtl_distilled_policy.py`, specified by
+> `BOUNDED_DISTILLED_SCHEDULER.md`.
 
 ## Controlling HW-v2 decision (2026-07-20)
 

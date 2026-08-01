@@ -1,5 +1,8 @@
 # RTL handoff checklist for protected18-v4
 
+> Archived baseline: do not implement this checklist as the final scheduler.
+> Use `RTL_BOUNDED_DISTILLED_SCHEDULER_CHECKLIST.md`.
+
 Status: implementation handoff only. This document does not claim that
 `Scheduler_hw` has been modified or synthesized.
 
