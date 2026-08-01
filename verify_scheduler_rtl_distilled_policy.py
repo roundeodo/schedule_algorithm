@@ -352,6 +352,9 @@ def main() -> int:
     source_paths = (
         HERE / "scheduler_rtl_distilled_policy.py",
         HERE / "scheduler_rtl_distilled_profiles.py",
+        HERE / "scheduler_rtl_distilled_types.py",
+        HERE / "scheduler_rtl_distilled_lowering.py",
+        HERE / "scheduler_rtl_distilled_scoring.py",
         HERE / "scheduler_rtl_unified_policy.py",
         HERE / "evaluate_olmoe_fixed_token_banks.py",
         HERE / "four_stage_scheduler.py",

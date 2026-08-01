@@ -37,21 +37,26 @@ gradient-trained model:
 
 1. the four-stage reference search supplies optimal paths for 65 directed
    OLMoE-style distributions;
-2. the frozen v4 profile union supplies candidate physical implementations;
+2. the frozen comparison baseline's profile union supplies candidate physical
+   implementations;
 3. closed-loop ablation separates logical-action coverage, physical-profile
    reduction, and continuation selection;
 4. redundant action families and dominated physical profiles are removed on
    discovery data;
-5. the compact policy is frozen and independently evaluated on validation,
-   blind-test, directed, and certificate inputs.
+5. the compact policy is frozen and evaluated on the 65-case directed
+   certificate regression and the partitioned 29,928-case comparison corpus.
+
+The partition labels in the 29,928-case corpus are retained for reporting, but
+they are not claimed as a never-observed blind test because aggregate results
+were inspected during iterative policy development.
 
 The structural ablation is reproducible with
 `ablate_scheduler_rtl_distilled_structure.py`:
 
 | Variant | Exact certificates | Total target gap | Meaning |
 |---|---:|---:|---|
-| frozen v4 | 65/65 | 0 tick | frozen quality baseline |
-| naive single-bank union | 6/65 | +870 tick | deleting protected arbitration alone is invalid |
+| frozen comparison baseline | 65/65 | 0 tick | frozen quality baseline |
+| naive single-bank union | 8/65 | +866 tick | deleting protected arbitration alone is invalid |
 | source-order local reduction | 65/65 | 0 tick | inherited profile order hides a physical tie-break |
 | reversed source order, no semantic tie-break | 34/65 | +131 tick | profile-order dependence is not an acceptable RTL contract |
 | S2PF-aware local reduction | 65/65 | 0 tick | explicit physical tie-break |
@@ -146,16 +151,18 @@ Rphysical = (
 candidate-origin field participates in the decision.  Equal child states are
 deduplicated after local reduction.
 
-The five physical profiles removed during the final pruning never became a
-local winner in the discovery split.  Re-running the unchanged policy on
-validation and blind-test inputs confirmed bit-identical final makespans.
+The five physical profiles removed during final pruning are absent from the
+32-profile bank.  The final structural ablation retains 65/65 certified
+outcomes, and every retained profile becomes a local or global winner in the
+29,928-case run.  The 65-case result proves certified regression equivalence;
+it is not presented as an independent test split.
 
 ## 6. Single bounded continuation comparator
 
 Every locally reduced logical action enters the same public selector:
 
 ```text
-select_bounded_continuation_winner(state, logical_candidates)
+select_continuation_winner(state, logical_candidates)
 ```
 
 Candidate provenance is not an input.  The comparator first calculates four
@@ -179,8 +186,8 @@ ONE_IDLE:
    remaining_count)
 ```
 
-One deterministic `better(lhs, rhs, state)` comparator folds the candidate
-stream once.  Five bounded state predicates change field priority when the
+One deterministic `better(lhs, rhs, state)` comparator folds the fixed-order
+candidate stream once.  Five bounded state predicates change field priority when the
 fallback bound is unable to distinguish future progress:
 
 - sparse-hot synchronization;
@@ -190,11 +197,16 @@ fallback bound is unable to distinguish future progress:
 - large-slack fill.
 
 These are subconditions inside one comparator, not separate candidate paths or
-separate scorers.  Their exact integer predicates and dominance guards remain
-frozen in `select_practical_probe_candidate`, called only through the public
-`select_bounded_continuation_winner` entry point.  They use window ranks,
-aggregate counters, integer comparisons, additions, subtractions, and shifts;
-there is no multiply-accumulate coefficient array.
+separate scorers.  Their exact integer predicates, named thresholds and
+dominance guards are frozen in `scheduler_rtl_distilled_scoring.py`.  They use
+window ranks, aggregate counters, integer comparisons, additions,
+subtractions, and constant multiplication; there is no multiply-accumulate
+coefficient array or programmable parameter storage.
+
+`ScheduleStep.score` records the common base continuation key for trace audit.
+The selected winner is determined by that key together with the documented
+regime-aware pairwise comparator and fixed logical-action order; the recorded
+tuple alone is not claimed to determine every winner.
 
 The scalar-only ablation reached only 51/65 optimal certificates.  Therefore
 replacing the comparator with the fallback tuple is explicitly rejected.
@@ -312,8 +324,11 @@ three fixed-order baselines.
 
 - final mirror: `scheduler_rtl_distilled_policy.py`;
 - hard-wired profiles: `scheduler_rtl_distilled_profiles.py`;
-- continuation arithmetic and public selector:
-  `evaluate_olmoe_fixed_token_banks.py`;
+- shared constants and profile types: `scheduler_rtl_distilled_types.py`;
+- direct bounded candidate lowering:
+  `scheduler_rtl_distilled_lowering.py`;
+- continuation arithmetic, regime predicates and public selector:
+  `scheduler_rtl_distilled_scoring.py`;
 - certificate/30K validator: `verify_scheduler_rtl_distilled_policy.py`;
 - directed validator: `verify_scheduler_rtl_distilled_showcase.py`;
 - structural ablation: `ablate_scheduler_rtl_distilled_structure.py`;

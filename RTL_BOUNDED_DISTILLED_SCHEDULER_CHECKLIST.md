@@ -144,9 +144,10 @@ fold.  Preserve the existing bounded arithmetic:
 - selected-load, cluster-release, S2PF, window-rank, and aggregate-counter
   fields required by the frozen state predicates.
 
-The exact behavioral reference is
-`select_bounded_continuation_winner` in
-`evaluate_olmoe_fixed_token_banks.py`.
+The exact behavioral reference is `select_continuation_winner` in
+`scheduler_rtl_distilled_scoring.py`.  Logical candidates are folded in the
+fixed order emitted by `scheduler_rtl_distilled_policy.py`; RTL must preserve
+that order unless order invariance is separately proven.
 
 Do not implement:
 
@@ -202,7 +203,7 @@ Do not claim RTL equivalence until all gates pass:
 5. directed showcase lockstep at 129 tick;
 6. randomized lockstep with initial-cache and no-cache cases;
 7. full 29,928-case aggregate equality to
-   `scheduler_rtl_distilled_30k.json`;
+   `bounded_top5_bottom1_random_validation.json`;
 8. synthesis and timing report against the current 6000-LUT/1590-FF external
    baseline.
 

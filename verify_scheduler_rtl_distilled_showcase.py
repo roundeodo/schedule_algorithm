@@ -194,7 +194,7 @@ def main() -> int:
     if result.makespan_cc != target_cc or v4_result.makespan_cc != target_cc:
         raise AssertionError("showcase scheduler misses certified optimum")
     payload = {
-        "schema": "scheduler_rtl_distilled_showcase_v1",
+        "schema": "bounded_distilled_showcase",
         "manifest": {
             "proof65": str(PROOF65.resolve()),
             "proof65_sha256": _sha256(PROOF65),
@@ -204,6 +204,9 @@ def main() -> int:
                     Path(__file__).resolve(),
                     HERE / "scheduler_rtl_distilled_policy.py",
                     HERE / "scheduler_rtl_distilled_profiles.py",
+                    HERE / "scheduler_rtl_distilled_types.py",
+                    HERE / "scheduler_rtl_distilled_lowering.py",
+                    HERE / "scheduler_rtl_distilled_scoring.py",
                     HERE / "four_stage_scheduler.py",
                 )
             },

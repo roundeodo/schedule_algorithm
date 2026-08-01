@@ -10,10 +10,16 @@ import hashlib
 import json
 from pathlib import Path
 
-import evaluate_olmoe_fixed_token_banks as policy
 import four_stage_scheduler as reference
+import scheduler_rtl_distilled_lowering as lowering
 import scheduler_rtl_distilled_policy as distilled
+import scheduler_rtl_distilled_scoring as scoring
 import scheduler_rtl_unified_policy as frozen_v4
+from scheduler_rtl_distilled_types import (
+    CandidateProfile,
+    LogicalActionSpec,
+    PhysicalProfile,
+)
 
 
 HERE = Path(__file__).resolve().parent
@@ -21,8 +27,30 @@ PROOF65 = HERE / "results/policy_search/olmoe_top2_projection_65_optimal_v1.json
 OUTPUT = HERE / "results/policy_search/scheduler_rtl_distilled_structure_ablation.json"
 TICK_CC = distilled.TICK_CC
 
+def _clean_profile(token) -> CandidateProfile:
+    logical = token.logical
+    physical = token.physical
+    return CandidateProfile(
+        logical=LogicalActionSpec(
+            mode=logical.mode,
+            family=logical.family,
+            selectors=tuple(logical.selectors),
+            split_rule=logical.split_rule,
+        ),
+        physical=PhysicalProfile(
+            **{
+                field: getattr(physical, field)
+                for field in PhysicalProfile.__dataclass_fields__
+            }
+        ),
+    )
+
+
 ALL_V4_PROFILES = tuple(
-    dict.fromkeys((*frozen_v4.COMPILED_TOKENS, *frozen_v4.RECOVERY_TOKENS))
+    dict.fromkeys(
+        _clean_profile(token)
+        for token in (*frozen_v4.COMPILED_TOKENS, *frozen_v4.RECOVERY_TOKENS)
+    )
 )
 UTILIZED_PROFILES = tuple(
     token
@@ -53,21 +81,18 @@ def _logical_key(
     state: reference.BeamState,
     action: reference.StageAction,
 ) -> tuple:
-    logical = policy._explicit_logical_token(state, action, distilled.WINDOW)
+    logical = lowering.logical_action_spec(state, action, distilled.WINDOW)
     return logical.mode, logical.family, logical.selectors, logical.split_rule
 
 
 def _materialize(
     state: reference.BeamState,
-    profiles: tuple[policy.ExplicitCandidateToken, ...],
+    profiles: tuple[CandidateProfile, ...],
     prefer_s2pf: bool,
 ) -> tuple[list[reference.StageAction], int]:
-    runtime, fixed_priorities = distilled._runtime_profile_bank(state, profiles)
-    concrete, _stats = policy.generate_direct_explicit_candidates_with_sources(
-        state,
-        runtime,
-        window=distilled.WINDOW,
-        start_policy="earliest_finish",
+    runtime, fixed_priorities = lowering.runtime_profile_bank(state, profiles)
+    concrete, _stats = lowering.materialize_candidates_with_sources(
+        state, runtime
     )
     grouped = defaultdict(list)
     for action, runtime_sources in concrete:
@@ -87,7 +112,7 @@ def _materialize(
             if eid >= 0
         ]
         _maximum, _minimum, _selected_sum, s2pf = (
-            policy._selected_action_features(action)
+            lowering.selected_action_features(action)
         )
         return (
             max(ends),
@@ -104,7 +129,7 @@ def _materialize(
     emitted = {}
     for action in reduced:
         child = reference.apply_action(state, action)
-        emitted.setdefault(policy._explicit_child_key(child), action)
+        emitted.setdefault(lowering.child_key(child), action)
     return list(emitted.values()), len(concrete)
 
 
@@ -115,20 +140,11 @@ def _select_scalar(
     ranked = []
     for index, action in enumerate(candidates):
         child = reference.apply_action(state, action)
-        child = policy._bounded_policy_state(
+        child = scoring.normalize_state_bound(
             child,
-            distilled.CONTINUATION_SCORER,
-            before_f_score=int(state.f_score),
+            parent_bound=int(state.f_score),
         )
-        score = policy.practical_probe_score(
-            state,
-            action,
-            child,
-            scorer=policy._practical_scalar_scorer(
-                distilled.CONTINUATION_SCORER
-            ),
-            sync_tiebreak="hot_cold",
-        )
+        score = scoring.base_continuation_key(state, action, child)
         ranked.append((score, index, child))
     return min(ranked, key=lambda item: item[:2])[2]
 
@@ -161,9 +177,7 @@ def _schedule_variant(distribution: dict[int, int], variant: str) -> tuple[int, 
             state = _select_scalar(state, candidates)
         else:
             _score, _slot, _action, state, _metadata = (
-                policy.select_bounded_continuation_winner(
-                    state, candidates, window=distilled.WINDOW
-                )
+                scoring.select_continuation_winner(state, candidates)
             )
     return int(state.g_score), physical_max
 
@@ -215,7 +229,7 @@ def main() -> int:
             ),
         }
     payload = {
-        "schema": "scheduler_rtl_distilled_structure_ablation_v1",
+        "schema": "bounded_distilled_structure_ablation",
         "manifest": {
             "proof65": str(PROOF65.resolve()),
             "proof65_sha256": _sha256(PROOF65),
@@ -226,8 +240,10 @@ def main() -> int:
                 for path in (
                     HERE / "scheduler_rtl_distilled_policy.py",
                     HERE / "scheduler_rtl_distilled_profiles.py",
+                    HERE / "scheduler_rtl_distilled_types.py",
+                    HERE / "scheduler_rtl_distilled_lowering.py",
+                    HERE / "scheduler_rtl_distilled_scoring.py",
                     HERE / "scheduler_rtl_unified_policy.py",
-                    HERE / "evaluate_olmoe_fixed_token_banks.py",
                     HERE / "four_stage_scheduler.py",
                 )
             },

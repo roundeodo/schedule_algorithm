@@ -9,8 +9,9 @@ Every round follows one fixed datapath:
 4. commit the single global winner.
 
 The mirror has no base/recovery split, protected winner, recovery margin,
-distribution classifier, beam expansion, SIM1, S4 prefetch or rollout.  The
-compiled profiles are hard-wired decode cases, not runtime-programmable ROM.
+batch-level distribution classifier, beam expansion, SIM1, S4 prefetch or
+rollout.  The compiled profiles are hard-wired decode cases, not
+runtime-programmable storage.
 """
 
 from __future__ import annotations
@@ -18,25 +19,30 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 import statistics
-from typing import Iterable, Mapping
+from typing import Mapping
 
-import evaluate_olmoe_fixed_token_banks as policy
 import four_stage_scheduler as reference
+import scheduler_rtl_distilled_lowering as lowering
+import scheduler_rtl_distilled_scoring as scoring
 from scheduler_rtl_distilled_profiles import COMPILED_PROFILES
+from scheduler_rtl_distilled_types import (
+    LOGICAL_ACTION_PRIORITY,
+    logical_action_order_key,
+    MAX_PHYSICAL_CANDIDATES,
+    POLICY_ID,
+    TICK_CC,
+    WINDOW,
+)
 
 
-POLICY_ID = "bounded-distilled-top5-bottom1"
-WINDOW = (5, 1)
-MAX_PHYSICAL_CANDIDATES = 18
-TICK_CC = policy.TICK_CC
-CONTINUATION_SCORER = policy.BOUNDED_CONTINUATION_SCORER
+CONTINUATION_SCORER = scoring.SCORER_ID
 
 
 def assert_top5_bottom1_contract() -> None:
     """Keep observation, candidates and continuation scorer consistent."""
     if WINDOW != (5, 1):
         raise AssertionError(f"unexpected runtime window {WINDOW}")
-    if tuple(policy.BOUNDED_CONTINUATION_WINDOW) != WINDOW:
+    if scoring.WINDOW != WINDOW:
         raise AssertionError("candidate and continuation windows disagree")
     visible = {f"T{rank}" for rank in range(5)} | {"B0"}
     used = {
@@ -48,6 +54,17 @@ def assert_top5_bottom1_contract() -> None:
         raise AssertionError(
             f"candidate bank exceeds top5+bottom1: {sorted(used - visible)}"
         )
+    logical_actions = {
+        (
+            token.logical.mode,
+            token.logical.family,
+            token.logical.selectors,
+            token.logical.split_rule,
+        )
+        for token in COMPILED_PROFILES
+    }
+    if logical_actions != set(LOGICAL_ACTION_PRIORITY):
+        raise AssertionError("compiled profiles and fixed logical IDs disagree")
 
 
 assert_top5_bottom1_contract()
@@ -91,147 +108,15 @@ class CandidateSet:
     physical_count: int
 
 
-def _active_cluster(token: policy.ExplicitCandidateToken) -> int | None:
-    active_c2 = token.physical.c2_s1 != "NONE"
-    active_c3 = token.physical.c3_s1 != "NONE"
-    if active_c2 == active_c3:
-        return None
-    return 2 if active_c2 else 3
-
-
-def _profile_with_residency(
-    profile: policy.ExplicitPhysicalProfile,
-    *,
-    c2_s1: bool,
-    c2_s3: bool,
-    c3_s1: bool,
-    c3_s3: bool,
-) -> policy.ExplicitPhysicalProfile:
-    values = {
-        field: getattr(profile, field)
-        for field in profile.__dataclass_fields__
-    }
-    for prefix, s1_hit, s3_hit in (
-        ("c2", c2_s1, c2_s3),
-        ("c3", c3_s1, c3_s3),
-    ):
-        if values[f"{prefix}_s1"] == "NONE":
-            continue
-        if s1_hit:
-            values[f"{prefix}_s1_cached"] = True
-            values[f"{prefix}_dma_s1"] = "NONE"
-        if s3_hit:
-            values[f"{prefix}_s3_cached"] = True
-            values[f"{prefix}_dma_s3"] = "NONE"
-            values[f"{prefix}_s2pf"] = "NONE"
-    return policy.ExplicitPhysicalProfile(**values)
-
-
-def _hit_state(
-    eid: int,
-    snap: reference.FourStageSnap,
-    start: int,
-) -> tuple[bool, bool]:
-    return (
-        reference._swiglu_hit_for_candidate(eid, snap, start),
-        reference._down_hit_for_candidate(eid, snap, start),
-    )
-
-
-def _runtime_profiles(
-    state: reference.BeamState,
-    token: policy.ExplicitCandidateToken,
-) -> tuple[policy.ExplicitCandidateToken, ...]:
-    logical = token.logical
-    if logical.mode != _mode(state):
-        return (token,)
-    selected = tuple(
-        policy._resolve_explicit_selector(state, selector, WINDOW)
-        for selector in logical.selectors
-    )
-    if any(eid is None for eid in selected):
-        return (token,)
-    eids = tuple(int(eid) for eid in selected if eid is not None)
-    variants: set[policy.ExplicitPhysicalProfile] = set()
-
-    if logical.family == "PAIR" and len(eids) == 2:
-        now = max(int(state.c2.task_end), int(state.c3.task_end))
-        for eid2, eid3 in (eids, tuple(reversed(eids))):
-            c2_s1, c2_s3 = _hit_state(eid2, state.c2, now)
-            c3_s1, c3_s3 = _hit_state(eid3, state.c3, now)
-            variants.add(
-                _profile_with_residency(
-                    token.physical,
-                    c2_s1=c2_s1,
-                    c2_s3=c2_s3,
-                    c3_s1=c3_s1,
-                    c3_s3=c3_s3,
-                )
-            )
-    elif logical.family == "SPLIT" and len(eids) == 1:
-        now = max(int(state.c2.task_end), int(state.c3.task_end))
-        c2_s1, c2_s3 = _hit_state(eids[0], state.c2, now)
-        c3_s1, c3_s3 = _hit_state(eids[0], state.c3, now)
-        variants.add(
-            _profile_with_residency(
-                token.physical,
-                c2_s1=c2_s1,
-                c2_s3=c2_s3,
-                c3_s1=c3_s1,
-                c3_s3=c3_s3,
-            )
-        )
-    elif logical.family == "SINGLE" and len(eids) == 1:
-        cluster = _active_cluster(token)
-        if cluster is not None:
-            own = state.c2 if cluster == 2 else state.c3
-            peer = state.c3 if cluster == 2 else state.c2
-            starts = {int(own.task_end), int(peer.task_end)}
-            if peer.s2pf_end >= 0:
-                starts.add(int(peer.s2pf_end))
-            for start in starts:
-                s1_hit, s3_hit = _hit_state(eids[0], own, start)
-                variants.add(
-                    _profile_with_residency(
-                        token.physical,
-                        c2_s1=s1_hit if cluster == 2 else False,
-                        c2_s3=s3_hit if cluster == 2 else False,
-                        c3_s1=s1_hit if cluster == 3 else False,
-                        c3_s3=s3_hit if cluster == 3 else False,
-                    )
-                )
-    if not variants:
-        variants.add(token.physical)
-    return tuple(
-        policy.ExplicitCandidateToken(logical=logical, physical=physical)
-        for physical in sorted(variants)
-    )
-
-
-def _runtime_profile_bank(
-    state: reference.BeamState,
-    profiles: Iterable[policy.ExplicitCandidateToken],
-) -> tuple[tuple[policy.ExplicitCandidateToken, ...], tuple[int, ...]]:
-    source_slots: dict[policy.ExplicitCandidateToken, set[int]] = defaultdict(set)
-    for profile_slot, token in enumerate(profiles):
-        for variant in _runtime_profiles(state, token):
-            source_slots[variant].add(profile_slot)
-    runtime_profiles = tuple(sorted(source_slots))
-    fixed_priorities = tuple(
-        min(source_slots[profile]) for profile in runtime_profiles
-    )
-    return runtime_profiles, fixed_priorities
-
-
 def _mode(state: reference.BeamState) -> str:
-    return policy._explicit_mode(state)
+    return lowering.mode(state)
 
 
 def _logical_action_key(
     state: reference.BeamState,
     action: reference.StageAction,
 ) -> tuple[str, str, tuple[str, ...], str]:
-    logical = policy._explicit_logical_token(state, action, WINDOW)
+    logical = lowering.logical_action_spec(state, action, WINDOW)
     return (
         logical.mode,
         logical.family,
@@ -261,7 +146,7 @@ def _physical_profile_key(
         if eid >= 0
     ]
     _maximum, _minimum, _selected_sum, s2pf = (
-        policy._selected_action_features(action)
+        lowering.selected_action_features(action)
     )
     return (
         max(ends),
@@ -287,22 +172,18 @@ def _initial_state(
         initial_cache_c2=int(initial_cache_c2),
         initial_cache_c3=int(initial_cache_c3),
     )._initial_state()
-    return policy._bounded_policy_state(state, CONTINUATION_SCORER)
+    return scoring.normalize_state_bound(state)
 
 
 def _materialize_candidate_set(
     state: reference.BeamState,
 ) -> CandidateSet:
-    runtime_profiles, fixed_priorities = _runtime_profile_bank(
+    runtime_profiles, fixed_priorities = lowering.runtime_profile_bank(
         state, COMPILED_PROFILES
     )
-    physical_with_sources, _stats = (
-        policy.generate_direct_explicit_candidates_with_sources(
-            state,
-            runtime_profiles,
-            window=WINDOW,
-            start_policy="earliest_finish",
-        )
+    physical_with_sources, _stats = lowering.materialize_candidates_with_sources(
+        state,
+        runtime_profiles,
     )
     physical = [
         (
@@ -332,13 +213,13 @@ def _materialize_candidate_set(
             grouped[logical],
             key=lambda item: _physical_profile_key(state, item[0], item[1]),
         )
-        for logical in sorted(grouped)
+        for logical in sorted(grouped, key=logical_action_order_key)
     ]
     emitted: dict[tuple, tuple[reference.StageAction, int]] = {}
     for action, fixed_profile_slot in reduced:
         child = reference.apply_action(state, action)
         emitted.setdefault(
-            policy._explicit_child_key(child), (action, fixed_profile_slot)
+            lowering.child_key(child), (action, fixed_profile_slot)
         )
     slots = tuple(
         CandidateSlot(
@@ -370,10 +251,9 @@ def _choose_one_round(
 ]:
     candidate_set = _materialize_candidate_set(state)
     score, selected_slot, action, child, _metadata = (
-        policy.select_bounded_continuation_winner(
+        scoring.select_continuation_winner(
             state,
             [slot.action for slot in candidate_set.slots],
-            window=WINDOW,
         )
     )
     return action, child, tuple(map(int, score)), candidate_set, selected_slot
@@ -397,10 +277,9 @@ def schedule(
             state
         )
         replay = reference.apply_action(before, action)
-        replay = policy._bounded_policy_state(
+        replay = scoring.normalize_state_bound(
             replay,
-            CONTINUATION_SCORER,
-            before_f_score=int(before.f_score),
+            parent_bound=int(before.f_score),
         )
         if replay != state:
             raise AssertionError("selected transition replay mismatch")

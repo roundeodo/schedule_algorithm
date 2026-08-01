@@ -7,7 +7,11 @@ runtime-programmable storage and does not require a ROM in RTL.
 
 from __future__ import annotations
 
-import evaluate_olmoe_fixed_token_banks as policy
+from scheduler_rtl_distilled_types import (
+    CandidateProfile,
+    LogicalActionSpec,
+    PhysicalProfile,
+)
 
 
 PROFILE_FIELD_ORDER = (
@@ -54,18 +58,18 @@ PROFILE_SPECS = (
 )
 
 
-def _compile_profiles() -> tuple[policy.ExplicitCandidateToken, ...]:
-    if tuple(policy.ExplicitPhysicalProfile.__dataclass_fields__) != PROFILE_FIELD_ORDER:
-        raise AssertionError("ExplicitPhysicalProfile field order changed")
+def _compile_profiles() -> tuple[CandidateProfile, ...]:
+    if tuple(PhysicalProfile.__dataclass_fields__) != PROFILE_FIELD_ORDER:
+        raise AssertionError("PhysicalProfile field order changed")
     profiles = tuple(
-        policy.ExplicitCandidateToken(
-            logical=policy.ExplicitLogicalToken(
+        CandidateProfile(
+            logical=LogicalActionSpec(
                 mode=mode,
                 family=family,
                 selectors=selectors,
                 split_rule=split_rule,
             ),
-            physical=policy.ExplicitPhysicalProfile(*physical),
+            physical=PhysicalProfile(*physical),
         )
         for (mode, family, selectors, split_rule), physical in PROFILE_SPECS
     )

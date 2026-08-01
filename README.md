@@ -10,6 +10,12 @@ active implementation specifications.
 - `scheduler_rtl_distilled_policy.py`: top-level round-by-round scheduler.
 - `scheduler_rtl_distilled_profiles.py`: 32 hard-wired physical profiles and
   their logical-action grouping.
+- `scheduler_rtl_distilled_types.py`: shared policy constants and fixed-profile
+  types.
+- `scheduler_rtl_distilled_lowering.py`: bounded selector resolution,
+  residency, DMA legality and direct four-stage action lowering.
+- `scheduler_rtl_distilled_scoring.py`: maintained counters, F/H/C/D bounds,
+  regime predicates and the continuation comparator.
 - `BOUNDED_DISTILLED_SCHEDULER.md`: normative algorithm and methodology.
 - `RTL_BOUNDED_DISTILLED_SCHEDULER_CHECKLIST.md`: RTL implementation handoff.
 
@@ -20,6 +26,10 @@ profiles to at most six logical actions, scores every logical action with one
 continuation comparator, and selects one global winner.  It has no
 base/recovery arbitration, beam/SIM1, standalone S4 prefetch, or runtime policy
 table.
+
+The active policy modules do not import the historical experiment driver
+`evaluate_olmoe_fixed_token_banks.py`.  That file remains only for archived
+experiments and the frozen comparison baseline.
 
 ## Validation entry points
 
@@ -43,6 +53,9 @@ Quick validation commands:
 
 ```bash
 python3 -m py_compile \
+  scheduler_rtl_distilled_types.py \
+  scheduler_rtl_distilled_lowering.py \
+  scheduler_rtl_distilled_scoring.py \
   scheduler_rtl_distilled_policy.py \
   scheduler_rtl_distilled_profiles.py \
   verify_scheduler_rtl_distilled_policy.py
