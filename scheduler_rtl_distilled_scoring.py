@@ -334,12 +334,25 @@ def select_continuation_winner(
     state: reference.BeamState,
     candidates: list[reference.StageAction],
 ) -> tuple[tuple[int, ...], int, reference.StageAction, reference.BeamState, dict]:
-    """Fold one fixed-order logical-candidate stream through one comparator."""
+    """Compatibility wrapper for callers without pre-lowered transitions."""
+    return select_continuation_transition_winner(
+        state,
+        [
+            (action, reference.apply_action(state, action))
+            for action in candidates
+        ],
+    )
+
+
+def select_continuation_transition_winner(
+    state: reference.BeamState,
+    candidates: list[tuple[reference.StageAction, reference.BeamState]],
+) -> tuple[tuple[int, ...], int, reference.StageAction, reference.BeamState, dict]:
+    """Fold one fixed-order stream of fully lowered transitions."""
     if not candidates:
         raise ValueError("continuation comparator requires at least one candidate")
     ranked = []
-    for candidate_index, action in enumerate(candidates):
-        child = reference.apply_action(state, action)
+    for candidate_index, (action, child) in enumerate(candidates):
         child = normalize_state_bound(child, parent_bound=int(state.f_score))
         ranked.append(
             (

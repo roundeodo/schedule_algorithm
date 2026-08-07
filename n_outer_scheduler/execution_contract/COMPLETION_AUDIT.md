@@ -10,8 +10,11 @@ results, including the previously reported 416-tick example, are withdrawn.
 The current contract uses:
 
 ```text
-phase -> block -> complete ordered expert list -> token tile
+local slot -> phase -> block -> complete ordered expert list -> token tile
 ```
+
+There is no global slot barrier.  Each cluster advances through its local
+slots as soon as its own compute/buffer state and the global DMA arbiter allow.
 
 No production RTL, Bingo, four-stage, or pre-existing N-outer source file was
 modified by this correction.
@@ -61,16 +64,21 @@ The focused suite checks:
 - directed zero-steady-stall result;
 - causal SINGLE_ONLY regression;
 - ping/pong ownership and DMA lane exclusion;
-- 25-bit descriptor pack/unpack;
+- compact 64-bit schedule/slot/slice stream round trip;
+- CVA6-style runtime-table round trip and workspace capacity;
 - fixed topology independent of distribution;
 - exact model/lowering/replay event equality;
 - 40 deterministic random group replays;
-- legal and overlapping SPLIT slices.
+- legal and overlapping SPLIT slices;
+- multi-slot local ordering and absence of a global slot barrier;
+- cross-slot first-weight prefetch with continuous ping/pong ownership;
+- empty-side slots and 20 deterministic random multi-slot replays.
 
-Current focused result: 13 tests pass.
+Current focused result: 25 tests pass.
 
 ## Remaining boundary
 
-This completes the isolated Python execution/lowering contract.  Production
-RTL and Bingo integration have not been implemented or physically measured.
-Those are separate future steps and must not be described as verified.
+This completes the isolated Python multi-slot execution, compact protocol,
+runtime-table lowering, and dependency-replay contract.  Production RTL and
+Bingo workers have not been implemented or physically measured.  Those are
+separate future steps and must not be described as verified.

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Lower a complete block-major group into a fixed Bingo runner program."""
+"""Audit lowering for compact multi-slot N-outer schedules.
+
+The compact scheduler words and runtime tables are the execution interface.
+The expanded LOAD/COMPUTE commands remain verification-only dependencies.
+"""
 
 from __future__ import annotations
 
@@ -7,41 +11,24 @@ from dataclasses import dataclass
 
 from .model import (
     DmaMask,
-    ExpertSlice,
     GroupPlan,
     ItemKey,
     NOuterSimulator,
     Phase,
+    SchedulePlan,
     ScheduleResult,
 )
-
-
-@dataclass(frozen=True)
-class RtlGroupRecord:
-    """One dynamic expert descriptor emitted in cluster-list order."""
-
-    group_last: bool
-    cluster_last: bool
-    cluster: int
-    eid: int
-    token_start: int
-    ntokens: int
-
-    def __post_init__(self) -> None:
-        if self.cluster not in (0, 1):
-            raise ValueError("cluster must be zero or one")
-        if not 0 <= self.eid < 64:
-            raise ValueError("record supports at most 64 experts")
-        if not 0 <= self.token_start < 256:
-            raise ValueError("token_start does not fit eight bits")
-        if not 1 <= self.ntokens <= 256:
-            raise ValueError("ntokens does not fit the 1..256 encoding")
-
-
-@dataclass(frozen=True)
-class RtlGroupImage:
-    group_id: int
-    records: tuple[RtlGroupRecord, ...]
+from .protocol import (
+    SchedulerWordStream,
+    decode_scheduler_words,
+    emit_scheduler_words,
+)
+from .runtime_interface import (
+    RuntimeLayout,
+    RuntimeScheduleTables,
+    decode_runtime_tables,
+    lower_runtime_tables,
+)
 
 
 @dataclass(frozen=True)
@@ -53,12 +40,12 @@ class StaticRunnerTemplate:
     """
 
     nodes: tuple[str, ...] = (
-        "group_start",
-        "c0_load_worker",
-        "c0_compute_worker",
-        "c1_load_worker",
-        "c1_compute_worker",
-        "group_join",
+        "host_prepare_schedule",
+        "c0_dma_slot_worker",
+        "c0_compute_slot_worker",
+        "c1_dma_slot_worker",
+        "c1_compute_slot_worker",
+        "host_schedule_join",
     )
 
     @property
@@ -68,7 +55,10 @@ class StaticRunnerTemplate:
 
 @dataclass(frozen=True)
 class RunnerLoadCommand:
+    """Expanded verification event; not an RTL word or public SW call."""
+
     key: ItemKey
+    slot_index: int
     phase: Phase
     block_id: int
     sequence_index: int
@@ -85,7 +75,10 @@ class RunnerLoadCommand:
 
 @dataclass(frozen=True)
 class RunnerComputeCommand:
+    """Expanded verification event; not an RTL word or public SW call."""
+
     key: ItemKey
+    slot_index: int
     phase: Phase
     block_id: int
     sequence_index: int
@@ -105,7 +98,8 @@ class RunnerComputeCommand:
 @dataclass(frozen=True)
 class StaticRunnerProgram:
     template: StaticRunnerTemplate
-    image: RtlGroupImage
+    scheduler_stream: SchedulerWordStream
+    runtime_tables: RuntimeScheduleTables
     loads: tuple[RunnerLoadCommand, ...]
     computes: tuple[RunnerComputeCommand, ...]
     lane_load_order: tuple[tuple[ItemKey, ...], tuple[ItemKey, ...]]
@@ -113,76 +107,9 @@ class StaticRunnerProgram:
 
 @dataclass(frozen=True)
 class LoweredContract:
-    plan: GroupPlan
+    plan: GroupPlan | SchedulePlan
     schedule: ScheduleResult
     runner_program: StaticRunnerProgram
-
-
-def emit_rtl_group(plan: GroupPlan) -> RtlGroupImage:
-    records: list[RtlGroupRecord] = []
-    flattened = [
-        (cluster, index, expert, len(plan.experts(cluster)))
-        for cluster in (0, 1)
-        for index, expert in enumerate(plan.experts(cluster))
-    ]
-    for position, (cluster, index, expert, count) in enumerate(flattened):
-        records.append(
-            RtlGroupRecord(
-                group_last=position + 1 == len(flattened),
-                cluster_last=index + 1 == count,
-                cluster=cluster,
-                eid=expert.eid,
-                token_start=expert.token_start,
-                ntokens=expert.ntokens,
-            )
-        )
-    return RtlGroupImage(plan.group_id, tuple(records))
-
-
-def decode_rtl_group(image: RtlGroupImage) -> GroupPlan:
-    clusters: list[list[ExpertSlice]] = [[], []]
-    if not image.records or not image.records[-1].group_last:
-        raise ValueError("RTL group image has no final record")
-    if any(record.group_last for record in image.records[:-1]):
-        raise ValueError("group_last appears before the final record")
-    seen_cluster_last = [False, False]
-    for record in image.records:
-        if seen_cluster_last[record.cluster]:
-            raise ValueError("record follows cluster_last")
-        clusters[record.cluster].append(
-            ExpertSlice(record.eid, record.token_start, record.ntokens)
-        )
-        if record.cluster_last:
-            seen_cluster_last[record.cluster] = True
-    for cluster in (0, 1):
-        if clusters[cluster] and not seen_cluster_last[cluster]:
-            raise ValueError("nonempty cluster is missing cluster_last")
-    return GroupPlan(tuple(clusters[0]), tuple(clusters[1]), image.group_id)
-
-
-def pack_rtl_record(record: RtlGroupRecord) -> int:
-    """Pack the frozen 26-bit descriptor into the low bits of one word."""
-
-    word = int(record.group_last)
-    word |= int(record.cluster_last) << 1
-    word |= record.cluster << 2
-    word |= record.eid << 3
-    word |= record.token_start << 9
-    word |= (record.ntokens - 1) << 17
-    return word
-
-
-def unpack_rtl_record(word: int) -> RtlGroupRecord:
-    if word < 0 or word >> 25:
-        raise ValueError("reserved record bits must be zero")
-    return RtlGroupRecord(
-        group_last=bool(word & 1),
-        cluster_last=bool((word >> 1) & 1),
-        cluster=(word >> 2) & 1,
-        eid=(word >> 3) & 0x3F,
-        token_start=(word >> 9) & 0xFF,
-        ntokens=((word >> 17) & 0xFF) + 1,
-    )
 
 
 def _lane_orders(schedule: ScheduleResult) -> tuple[tuple[ItemKey, ...], tuple[ItemKey, ...]]:
@@ -205,13 +132,48 @@ def _lane_orders(schedule: ScheduleResult) -> tuple[tuple[ItemKey, ...], tuple[I
 
 
 def lower_group(
-    plan: GroupPlan, *, simulator: NOuterSimulator | None = None
+    plan: GroupPlan,
+    *,
+    simulator: NOuterSimulator | None = None,
+    runtime_layout: RuntimeLayout = RuntimeLayout(),
+) -> LoweredContract:
+    schedule_plan = SchedulePlan((plan,), schedule_id=plan.group_id)
+    return _lower_schedule(
+        plan,
+        schedule_plan,
+        simulator=simulator,
+        runtime_layout=runtime_layout,
+    )
+
+
+def lower_schedule_plan(
+    plan: SchedulePlan,
+    *,
+    simulator: NOuterSimulator | None = None,
+    runtime_layout: RuntimeLayout = RuntimeLayout(),
+) -> LoweredContract:
+    return _lower_schedule(
+        plan,
+        plan,
+        simulator=simulator,
+        runtime_layout=runtime_layout,
+    )
+
+
+def _lower_schedule(
+    source_plan: GroupPlan | SchedulePlan,
+    schedule_plan: SchedulePlan,
+    *,
+    simulator: NOuterSimulator | None,
+    runtime_layout: RuntimeLayout,
 ) -> LoweredContract:
     simulator = simulator or NOuterSimulator()
-    image = emit_rtl_group(plan)
-    decoded = decode_rtl_group(image)
-    if decoded != plan:
-        raise AssertionError("RTL descriptor round trip changed the group plan")
+    scheduler_stream = emit_scheduler_words(schedule_plan)
+    decoded = decode_scheduler_words(scheduler_stream)
+    runtime_tables = lower_runtime_tables(decoded, layout=runtime_layout)
+    runtime_decoded = decode_runtime_tables(runtime_tables)
+    if decoded != schedule_plan or runtime_decoded != schedule_plan:
+        raise AssertionError("compact/runtime lowering changed the schedule plan")
     schedule = simulator.schedule(decoded)
     lane_orders = _lane_orders(schedule)
     lane_predecessor: dict[tuple[ItemKey, int], ItemKey | None] = {}
@@ -233,6 +195,7 @@ def lower_group(
             loads.append(
                 RunnerLoadCommand(
                     key=item.key,
+                    slot_index=item.slot_index,
                     phase=item.phase,
                     block_id=item.block_id,
                     sequence_index=item.sequence_index,
@@ -257,6 +220,7 @@ def lower_group(
             computes.append(
                 RunnerComputeCommand(
                     key=item.key,
+                    slot_index=item.slot_index,
                     phase=item.phase,
                     block_id=item.block_id,
                     sequence_index=item.sequence_index,
@@ -278,13 +242,14 @@ def lower_group(
 
     program = StaticRunnerProgram(
         template=StaticRunnerTemplate(),
-        image=image,
+        scheduler_stream=scheduler_stream,
+        runtime_tables=runtime_tables,
         loads=tuple(loads),
         computes=tuple(computes),
         lane_load_order=lane_orders,
     )
     validate_runner_program(program)
-    return LoweredContract(plan, schedule, program)
+    return LoweredContract(source_plan, schedule, program)
 
 
 def validate_runner_program(program: StaticRunnerProgram) -> None:

@@ -29,15 +29,15 @@ COVERAGE30K = tuple(
 DEFAULT_OUTPUTS = {
     "proof65": (
         HERE
-        / "results/policy_search/bounded_top5_bottom1_certificate_validation.json"
+        / "results/policy_search/bounded_top5_bottom1_fixed_lane_targeted_s4pf_certificate_validation.json"
     ),
     "coverage30k": (
         HERE
-        / "results/policy_search/bounded_top5_bottom1_random_validation.json"
+        / "results/policy_search/bounded_top5_bottom1_fixed_lane_targeted_s4pf_random_validation.json"
     ),
 }
 EXPECTED_CASES = {"proof65": 65, "coverage30k": 29_928}
-SCHEMA = "bounded_top5_bottom1_validation"
+SCHEMA = "bounded_top5_bottom1_fixed_lane_targeted_s4pf_validation"
 
 
 def _sha256(path: Path) -> str:
@@ -65,7 +65,18 @@ def _worker(job: dict) -> dict:
         distribution, c2, c3
     )
     v4_result = frozen_v4.schedule(distribution, c2, c3)
-    result = distilled.schedule(distribution, c2, c3)
+    no_s4pf_result = distilled.schedule(
+        distribution,
+        c2,
+        c3,
+        enable_s4pf=False,
+    )
+    result = distilled.schedule(
+        distribution,
+        c2,
+        c3,
+        enable_s4pf=True,
+    )
     selected_profile_uses = Counter(
         step.selected_profile_slot for step in result.steps
     )
@@ -84,6 +95,7 @@ def _worker(job: dict) -> dict:
         "target_cc": job["target_cc"],
         "adaptive_cc": int(adaptive_result.makespan_cc),
         "v4_cc": int(v4_result.makespan_cc),
+        "distilled_no_s4pf_cc": int(no_s4pf_result.makespan_cc),
         "distilled_cc": int(result.makespan_cc),
         "physical_candidate_count_max": int(
             result.physical_candidate_count_max
@@ -122,6 +134,16 @@ def _worker(job: dict) -> dict:
             str(slot): count
             for slot, count in sorted(local_profile_winner_uses.items())
         },
+        "s4pf_events": sum(len(step.s4pf_actions) for step in result.steps),
+        "s4pf_modes": dict(
+            sorted(
+                Counter(
+                    action.pf_dma.name
+                    for step in result.steps
+                    for action in step.s4pf_actions
+                ).items()
+            )
+        ),
     }
     if job["target_cc"] is not None:
         row["trace"] = [
@@ -134,6 +156,9 @@ def _worker(job: dict) -> dict:
                 "selected_profile_slot": step.selected_profile_slot,
                 "local_profile_slots": list(step.local_profile_slots),
                 "action": serialize_action(step.action),
+                "s4pf_actions": [
+                    serialize_action(action) for action in step.s4pf_actions
+                ],
             }
             for step in result.steps
         ]
@@ -164,6 +189,11 @@ def _comparison(
 
 def _bucket_summary(rows: list[dict]) -> dict:
     summary = {
+        "distilled_s4pf_vs_no_s4pf": _comparison(
+            rows,
+            "distilled_cc",
+            "distilled_no_s4pf_cc",
+        ),
         "distilled_vs_v4": _comparison(rows, "distilled_cc", "v4_cc"),
         "distilled_vs_adaptive": _comparison(
             rows, "distilled_cc", "adaptive_cc"
@@ -209,6 +239,19 @@ def _bucket_summary(rows: list[dict]) -> dict:
                 )
                 for mode in ("SYNC", "ONE_IDLE", "TERMINAL")
             },
+            "s4pf_cases": sum(row["s4pf_events"] > 0 for row in rows),
+            "s4pf_events": sum(row["s4pf_events"] for row in rows),
+            "s4pf_modes": dict(
+                sorted(
+                    sum(
+                        (
+                            Counter(row["s4pf_modes"])
+                            for row in rows
+                        ),
+                        Counter(),
+                    ).items()
+                )
+            ),
         },
     }
     targets = [row for row in rows if row["target_cc"] is not None]
@@ -256,9 +299,12 @@ def _audit_proof_traces(rows_by_key: dict[str, dict], jobs: list[dict]) -> None:
             dict(job["distribution"]), int(job["c2"]), int(job["c3"])
         )
         for round_index, recorded in enumerate(row["trace"]):
-            candidate_set = distilled._materialize_candidate_set(state)
+            candidate_set = distilled._materialize_candidate_set(
+                state,
+                enable_s4pf=True,
+            )
             action, child, score, regenerated, selected_slot = (
-                distilled._choose_one_round(state)
+                distilled._choose_one_round(state, enable_s4pf=True)
             )
             if candidate_set != regenerated:
                 raise AssertionError(
@@ -281,6 +327,13 @@ def _audit_proof_traces(rows_by_key: dict[str, dict], jobs: list[dict]) -> None:
             if serialize_action(action) != recorded["action"]:
                 raise AssertionError(
                     f"{key} round {round_index}: serialized action mismatch"
+                )
+            if [
+                serialize_action(prefetch)
+                for prefetch in candidate_set.slots[selected_slot].s4pf_actions
+            ] != recorded["s4pf_actions"]:
+                raise AssertionError(
+                    f"{key} round {round_index}: S4PF action mismatch"
                 )
             if list(score) != recorded["score"]:
                 raise AssertionError(f"{key} round {round_index}: score mismatch")
@@ -373,8 +426,17 @@ def main() -> int:
             "sum_task_end",
             "latest_start",
             "prefer_s2_prefetch",
+            "prefer_targeted_s4_prefetch",
             "fixed_profile_priority",
         ],
+        "s4pf": {
+            "lowering": "targeted_consumer_aware",
+            "trial_order": ["cluster_local_single", "both", "off"],
+            "cluster_order": [2, 3],
+            "min_remaining": distilled.lowering.S4PF_MIN_REMAINING,
+            "min_current_gain_ticks": distilled.S4PF_MIN_CURRENT_GAIN_TICKS,
+            "off_baseline_retained": True,
+        },
         "inputs": [
             {"path": str(path), "sha256": _sha256(path)} for path in inputs
         ],

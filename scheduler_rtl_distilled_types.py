@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import four_stage_scheduler as reference
 
 
-POLICY_ID = "bounded-distilled-top5-bottom1"
+POLICY_ID = "bounded-distilled-top5-bottom1-targeted-s4pf"
 WINDOW = (5, 1)
 MAX_PHYSICAL_CANDIDATES = 18
 TICK_CC = reference.SCHEDULE_TIME_QUANTUM_CC

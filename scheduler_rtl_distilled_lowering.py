@@ -2,8 +2,11 @@
 """Bounded candidate-profile lowering for the final RTL scheduler mirror.
 
 The module contains no search, learned parameters, legacy candidate banks or
-standalone prefetch actions.  It resolves the fixed Top5+Bottom1 profiles into
-legal four-stage actions for one runtime state.
+top-level prefetch candidates.  It resolves the fixed Top5+Bottom1 profiles
+into legal four-stage actions for one runtime state.  S4PF is lowered together
+with a concrete next same-cluster consumer, matching the fixed C2-then-C3 and
+local-SINGLE-then-BOTH trial order.  The no-S4PF realization is always kept as
+the local baseline.
 """
 
 from __future__ import annotations
@@ -26,6 +29,13 @@ _SHAPES = {
     reference.SHAPE_B.name: reference.SHAPE_B,
     reference.SHAPE_C.name: reference.SHAPE_C,
 }
+
+# Targeted S4PF is disabled in the short tail.  With eight or fewer remaining
+# descriptors, the continuation comparator is already close to terminal and a
+# small local timing change can reorder the exact tail without enough future
+# reuse to recover it.  The threshold is validated as part of the OFF/ON
+# closed-loop comparison rather than being a workload classifier.
+S4PF_MIN_REMAINING = 9
 
 
 def mode(state: reference.BeamState) -> str:
@@ -184,6 +194,15 @@ def _dma(name: str) -> reference.DmaBinding:
         return reference.DmaBinding[name]
     except KeyError as exc:
         raise ValueError(f"unknown fixed DMA binding {name!r}") from exc
+
+
+def _single_dma_for_cluster(cluster: int) -> reference.DmaBinding:
+    """Return the fixed owning lane used by all single-lane prefetches."""
+    if cluster == 2:
+        return reference.DmaBinding.IDMA
+    if cluster == 3:
+        return reference.DmaBinding.XDMA
+    raise ValueError(f"invalid cluster {cluster}")
 
 
 def _active_cluster(profile: PhysicalProfile) -> int | None:
@@ -468,6 +487,55 @@ def _single_cluster_is_legal(state: reference.BeamState, cluster: int) -> bool:
     return cluster == 2 or (cluster == 3 and state.c2 != state.c3)
 
 
+def _s4pf_action(
+    *,
+    cluster: int,
+    target_eid: int,
+    start: int,
+    binding: reference.DmaBinding,
+) -> reference.StageAction:
+    """Build one hidden action targeting the next same-cluster expert.
+
+    The action is inserted immediately before its consumer in the Python
+    history.  An RTL pending record can hold the preceding task until this
+    target EID is known, so no wildcard cache state is needed in the selected
+    round-to-round policy state.
+    """
+    shape = (
+        reference.SHAPE_C
+        if binding == reference.DmaBinding.BOTH
+        else reference.SHAPE_A
+    )
+    inactive = dict(
+        c2_eid=-1,
+        c2_ntok=0,
+        c2_shape_s1=None,
+        c2_shape_s3=None,
+        c2_start=-1,
+        c2_s1_cached=False,
+        c2_s3_cached=False,
+        c3_eid=-1,
+        c3_ntok=0,
+        c3_shape_s1=None,
+        c3_shape_s3=None,
+        c3_start=-1,
+        c3_s1_cached=False,
+        c3_s3_cached=False,
+    )
+    inactive[f"c{cluster}_eid"] = -2
+    inactive[f"c{cluster}_shape_s1"] = shape
+    inactive[f"c{cluster}_start"] = int(start)
+    return reference.StageAction(
+        **inactive,
+        pf_cluster=int(cluster),
+        pf_eid=int(target_eid),
+        pf_shape=shape,
+        pf_start=int(start),
+        pf_dma=binding,
+        tag=f"AUTO-S4PF-C{cluster}({binding.name})",
+    )
+
+
 def _materialize_one_profile(
     state: reference.BeamState,
     token: CandidateProfile,
@@ -682,6 +750,115 @@ def _materialize_one_profile(
             child = reference.apply_action(state, action)
             actions.setdefault(child_key(child), action)
     return list(actions.values())
+
+
+def materialize_targeted_s4pf_variant(
+    state: reference.BeamState,
+    action: reference.StageAction,
+) -> tuple[
+    reference.StageAction,
+    reference.BeamState,
+    tuple[reference.StageAction, ...],
+] | None:
+    """Lower S4PF jointly with the concrete action that consumes it.
+
+    The no-S4PF action remains available to the caller.  This helper tries the
+    fixed local SINGLE lane first and BOTH second for each active cluster, in
+    C2-then-C3 order.  A targeted prefetch is retained only after the resulting
+    cached physical profile can be materialized and its complete child state is
+    known.  Consequently no prefetch DMA interval survives into an unknown
+    future round.
+    """
+    if len(state.remaining) < S4PF_MIN_REMAINING:
+        return None
+
+    augmented = state
+    prefetch_actions: list[reference.StageAction] = []
+    prefetched_clusters: set[int] = set()
+
+    for cluster in (2, 3):
+        eid = int(getattr(action, f"c{cluster}_eid"))
+        if eid < 0 or bool(getattr(action, f"c{cluster}_s1_cached")):
+            continue
+        own = augmented.c2 if cluster == 2 else augmented.c3
+        peer = augmented.c3 if cluster == 2 else augmented.c2
+        if own.cur_eid < 0 or own.pf_eid != -1:
+            continue
+        start = int(own.dma3_end)
+        # If the peer has already advanced past this point, its replaced
+        # snapshot no longer carries every DMA interval that could overlap a
+        # retroactive prefetch.  Such a trial cannot be certified from the
+        # bounded state and must remain OFF.
+        if peer.cur_eid >= 0 and start < int(peer.task_start):
+            continue
+        compute_end = int(
+            own.compute_end if own.compute_end >= 0 else own.task_end
+        )
+        for binding in (
+            _single_dma_for_cluster(cluster),
+            reference.DmaBinding.BOTH,
+        ):
+            shape = (
+                reference.SHAPE_C
+                if binding == reference.DmaBinding.BOTH
+                else reference.SHAPE_A
+            )
+            trial = own.with_prefetch(eid, shape, start, binding)
+            if int(trial.pf_end) > compute_end:
+                continue
+            feasible = (
+                reference.bw_feasible(trial, peer)
+                if cluster == 2
+                else reference.bw_feasible(peer, trial)
+            )
+            if not feasible:
+                continue
+            prefetch = _s4pf_action(
+                cluster=cluster,
+                target_eid=eid,
+                start=start,
+                binding=binding,
+            )
+            augmented = reference.apply_action(augmented, prefetch)
+            prefetch_actions.append(prefetch)
+            prefetched_clusters.add(cluster)
+            break
+
+    if not prefetch_actions:
+        return None
+
+    base_profile = physical_profile(action)
+    cached_profile = _profile_with_residency(
+        base_profile,
+        c2_s1=2 in prefetched_clusters,
+        c2_s3=bool(action.c2_s3_cached),
+        c3_s1=3 in prefetched_clusters,
+        c3_s3=bool(action.c3_s3_cached),
+    )
+    token = CandidateProfile(
+        logical=logical_action_spec(state, action, WINDOW),
+        physical=cached_profile,
+    )
+    candidates = _materialize_one_profile(augmented, token)
+    if not candidates:
+        return None
+
+    def transition_key(candidate: reference.StageAction) -> tuple[int, int, int]:
+        child = reference.apply_action(augmented, candidate)
+        starts = [
+            int(start)
+            for eid, start in (
+                (candidate.c2_eid, candidate.c2_start),
+                (candidate.c3_eid, candidate.c3_start),
+            )
+            if eid >= 0
+        ]
+        ends = (int(child.c2.task_end), int(child.c3.task_end))
+        return max(ends), sum(ends), max(starts, default=0)
+
+    selected = min(candidates, key=transition_key)
+    child = reference.apply_action(augmented, selected)
+    return selected, child, tuple(prefetch_actions)
 
 
 def materialize_candidates_with_sources(

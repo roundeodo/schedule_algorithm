@@ -1,87 +1,117 @@
-# Bingo static runner for block-major N-outer
+# Bingo static runner for multi-slot N-outer
 
 ## Fixed graph
 
-One group uses six fixed nodes:
+The graph is schedule-level and independent of slot, block, and expert count:
 
 ```text
-group_start
-  |-- C0_LOAD_WORKER    (DM core)
-  |-- C0_COMPUTE_WORKER (VC core)
-  |-- C1_LOAD_WORKER    (DM core)
-  `-- C1_COMPUTE_WORKER (VC core)
-group_join
+host_prepare_schedule
+  |-- C0_DMA_SLOT_WORKER
+  |-- C0_COMPUTE_SLOT_WORKER
+  |-- C1_DMA_SLOT_WORKER
+  `-- C1_COMPUTE_SLOT_WORKER
+all workers -> host_schedule_join
 ```
 
-LOAD and COMPUTE must remain separate nodes so DMA and VersaCore execution can
-overlap.  No weight block or expert becomes a dynamically created Bingo node.
+All four device workers start concurrently.  LOAD and COMPUTE remain separate
+because they use different cores and must overlap.  A DFG edge from an entire
+DMA worker to an entire COMPUTE worker is forbidden.
 
-## Dynamic descriptor
+## Compact dynamic input
 
-The RTL/host descriptor is a complete ordered list per cluster:
+The RTL stream uses 64-bit records:
 
 ```text
-group_last       1 bit
-cluster_last     1 bit
-cluster          1 bit
-expert_id        6 bits
-token_start      8 bits
-ntokens_minus_1  8 bits
+SCHEDULE header
+SLOT header
+  C0 SLICE records in local order
+  C1 SLICE records in local order
+SLOT header
+  ...
 ```
 
-The packed record occupies 25 low bits.  Phase sizes, block counts, weight
-strides, and ping/pong addresses are static model context.  CVA6 derives M4/M2
-iteration counts and valid-tail metadata from each record.
+The semantic dynamic fields are:
+
+```text
+slot/group id
+cluster-local slice counts
+expert id
+token_start
+real ntokens
+```
+
+The stream contains no phase/block command, timestamp, address, buffer index,
+or Bingo node identifier.  Exact field packing is implemented in
+`protocol.py`.
+
+## CVA6 lowering
+
+CVA6 builds a schedule header, slot table, and slice table.  From the compact
+records and static layout it derives:
+
+```text
+token-reference position
+L1 input/intermediate/output offsets
+M4/M2 iteration counts
+valid-tail metadata
+physical base/stride context
+```
+
+The worker ABI is schedule-level:
+
+```text
+NOuterWorkerArgs {
+  schedule_header_addr
+  static_context_addr
+  runtime_sync_addr
+  cluster_id
+  worker_role
+}
+```
 
 ## Worker loop
 
-Both workers derive the same linear item index:
+Each cluster independently executes:
 
 ```text
-for phase:
-  for block:
-    for descriptor in cluster_list:
-      item_index++
+for local_slot in schedule order:
+  for phase in [Gate/Up, Down]:
+    for block in phase:
+      for slice in local_slot.cluster_list:
+        process every M4/M2 tile
 ```
 
-`buffer_slot = item_index & 1`.
+There is no cross-cluster slot barrier.  Stream indices and ping/pong
+generations continue across slot boundaries.  The first weight of the next
+local slot may therefore be prefetched before the current slot's final compute
+ends when the buffer and DMA grant are legal.
 
-LOAD worker:
+DMA worker:
 
 ```text
-wait COMPUTE(item_index-2) released buffer_slot
-obtain deterministic iDMA/xDMA/BOTH grant
-load weight block
-publish LOAD_DONE(item_index)
+wait buffer_released(item-2)
+request the single global DMA arbiter
+load the selected weight block
+publish weight_ready(item)
 ```
 
 COMPUTE worker:
 
 ```text
-wait LOAD_DONE(item_index)
-wait COMPUTE_DONE(item_index-1)
-run every M4/M2 token tile for this descriptor
-publish COMPUTE_DONE(item_index)
+wait weight_ready(item)
+wait previous local compute
+execute all token tiles for the slice
+publish buffer_released(item)
 ```
 
-Completion words are single-writer: only a LOAD worker writes its LOAD_DONE
-event and only a COMPUTE worker writes its COMPUTE_DONE event.  Consumers read
-with volatile/acquire semantics and producers publish with release/fence
-semantics.  Shared multi-writer counters are forbidden.
+Completion generations are single-writer.  Two cluster DM workers never
+decide BOTH ownership independently; one logical arbiter owns all iDMA/xDMA
+grants.
 
-## DMA plan reproduction
+## Audit trace versus runtime ABI
 
-The Python timespan engine applies a deterministic ready-only arbiter.  Host
-lowering reruns the same recurrence and emits each LOAD's lane mask and the
-predecessor on every occupied lane.  The fixed worker can therefore reproduce
-the selected schedule without absolute start timestamps.
-
-An equivalent implementation may place the same deterministic arbiter beside
-the two LOAD workers.  It must produce the same grant sequence for identical
-descriptors; otherwise Python/RTL/Bingo timing equivalence is not established.
-
-## Runtime versus model time
-
-Runner commands contain durations and dependencies, not absolute start ticks.
-The tick trace is audit metadata.  Earliest execution under the emitted
-dependencies must reproduce every model LOAD/COMPUTE interval.
+`lowering.py` expands the compact plan into `RunnerLoadCommand` and
+`RunnerComputeCommand` records only for verification.  `replay.py` consumes
+their dependencies to prove agreement with the timing recurrence.  These
+records are not RTL words, public SW calls, or arrays required by the device
+worker ABI.

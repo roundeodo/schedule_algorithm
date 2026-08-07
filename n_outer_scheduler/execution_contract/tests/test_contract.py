@@ -6,11 +6,8 @@ import unittest
 from ..adapter import adapt_completed_candidate
 from ..lowering import (
     StaticRunnerTemplate,
-    decode_rtl_group,
-    emit_rtl_group,
     lower_group,
-    pack_rtl_record,
-    unpack_rtl_record,
+    lower_schedule_plan,
 )
 from ..model import (
     ContractConfig,
@@ -19,12 +16,23 @@ from ..model import (
     ExpertSlice,
     GroupPlan,
     Phase,
+    SchedulePlan,
     TICK_CC,
+    build_schedule_streams,
     build_streams,
     schedule_group,
+    schedule_plan,
     slices_from_counts,
 )
 from ..replay import replay_static_runner
+from ..protocol import decode_scheduler_words, emit_scheduler_words
+from ..runtime_interface import (
+    NOuterWorkerArgs,
+    RuntimeLayout,
+    WorkerRole,
+    decode_runtime_tables,
+    lower_runtime_tables,
+)
 
 
 def directed_plan() -> GroupPlan:
@@ -123,15 +131,12 @@ class BlockMajorContractTest(unittest.TestCase):
                         loads[item.key].start_tick,
                     )
 
-    def test_rtl_descriptor_round_trip_preserves_complete_lists(self) -> None:
+    def test_single_slot_compact_stream_preserves_complete_lists(self) -> None:
         plan = directed_plan()
-        image = emit_rtl_group(plan)
-        self.assertEqual(len(image.records), 8)
-        self.assertEqual(decode_rtl_group(image), plan)
-        for record in image.records:
-            word = pack_rtl_record(record)
-            self.assertLess(word.bit_length(), 26)
-            self.assertEqual(unpack_rtl_record(word), record)
+        wrapped = SchedulePlan((plan,), schedule_id=plan.group_id)
+        stream = emit_scheduler_words(wrapped)
+        self.assertEqual(len(stream.words), 10)
+        self.assertEqual(decode_scheduler_words(stream), wrapped)
 
     def test_lowered_runner_replays_every_tick_exactly(self) -> None:
         lowered = lower_group(directed_plan())
@@ -203,10 +208,221 @@ class BlockMajorContractTest(unittest.TestCase):
                 (ExpertSlice(3, 7, 9),),
             )
 
-    def test_adapter_discards_planning_epoch_boundaries(self) -> None:
+    def test_adapter_builds_one_completed_slot(self) -> None:
         plan = directed_plan()
         adapted = adapt_completed_candidate(plan.cluster0, plan.cluster1, group_id=7)
         self.assertEqual(adapted, plan)
+
+
+class MultiSlotContractTest(unittest.TestCase):
+    @staticmethod
+    def plan() -> SchedulePlan:
+        return SchedulePlan(
+            (
+                GroupPlan(
+                    (ExpertSlice(0, 0, 2),),
+                    (ExpertSlice(1, 0, 16),),
+                    group_id=0,
+                ),
+                GroupPlan(
+                    (ExpertSlice(2, 0, 2),),
+                    (ExpertSlice(3, 0, 2),),
+                    group_id=1,
+                ),
+            ),
+            schedule_id=9,
+        )
+
+    def test_single_slot_wrapper_preserves_original_timing(self) -> None:
+        slot = directed_plan()
+        single = schedule_group(slot)
+        wrapped = schedule_plan(SchedulePlan((slot,), schedule_id=99))
+        self.assertEqual(single.makespan_ticks, wrapped.makespan_ticks)
+        self.assertEqual(single.steady_stall_ticks, wrapped.steady_stall_ticks)
+        self.assertEqual(
+            [(event.start_tick, event.end_tick) for event in single.loads],
+            [(event.start_tick, event.end_tick) for event in wrapped.loads],
+        )
+        self.assertEqual(
+            [(event.start_tick, event.end_tick) for event in single.computes],
+            [(event.start_tick, event.end_tick) for event in wrapped.computes],
+        )
+
+    def test_stream_order_is_local_slot_then_phase_block_slice(self) -> None:
+        c0, c1 = build_schedule_streams(self.plan())
+        self.assertEqual(
+            (c0[15].slot_index, c0[15].phase, c0[15].block_id),
+            (0, Phase.DOWN, 7),
+        )
+        self.assertEqual(
+            (c0[16].slot_index, c0[16].phase, c0[16].block_id),
+            (1, Phase.GATE_UP, 0),
+        )
+        self.assertEqual(
+            (c1[15].slot_index, c1[15].phase, c1[15].block_id),
+            (0, Phase.DOWN, 7),
+        )
+        self.assertEqual(
+            (c1[16].slot_index, c1[16].phase, c1[16].block_id),
+            (1, Phase.GATE_UP, 0),
+        )
+
+    def test_clusters_advance_slots_without_global_barrier(self) -> None:
+        result = schedule_plan(self.plan())
+        c0_slot1_start = min(
+            event.start_tick
+            for event in result.computes
+            if event.item.key.cluster == 0 and event.item.slot_index == 1
+        )
+        c1_slot0_end = max(
+            event.end_tick
+            for event in result.computes
+            if event.item.key.cluster == 1 and event.item.slot_index == 0
+        )
+        self.assertLess(c0_slot1_start, c1_slot0_end)
+        self.assertEqual(c0_slot1_start, 30)
+        self.assertEqual(c1_slot0_end, 198)
+
+    def test_cross_slot_first_weight_prefetch_uses_continuous_buffers(self) -> None:
+        result = schedule_plan(self.plan())
+        c0_slot1_load = min(
+            (event for event in result.loads
+             if event.item.key.cluster == 0 and event.item.slot_index == 1),
+            key=lambda event: event.start_tick,
+        )
+        c0_slot0_end = max(
+            event.end_tick
+            for event in result.computes
+            if event.item.key.cluster == 0 and event.item.slot_index == 0
+        )
+        self.assertLess(c0_slot1_load.start_tick, c0_slot0_end)
+        self.assertEqual((c0_slot1_load.start_tick, c0_slot1_load.end_tick), (28, 30))
+        self.assertEqual(c0_slot0_end, 29)
+
+    def test_real_token_intervals_cannot_overlap_across_slots(self) -> None:
+        with self.assertRaises(ValueError):
+            SchedulePlan(
+                (
+                    GroupPlan((ExpertSlice(5, 0, 8),), (), group_id=0),
+                    GroupPlan((), (ExpertSlice(5, 7, 9),), group_id=1),
+                )
+            )
+
+    def test_compact_rtl_stream_round_trip_preserves_all_slots(self) -> None:
+        plan = self.plan()
+        stream = emit_scheduler_words(plan)
+        self.assertEqual(decode_scheduler_words(stream), plan)
+        self.assertEqual(len(stream.words), 1 + 2 + 4)
+        self.assertTrue(all(0 <= word < 1 << 64 for word in stream.words))
+
+    def test_runtime_tables_round_trip_and_derive_slice_fields(self) -> None:
+        plan = self.plan()
+        tables = lower_runtime_tables(plan)
+        self.assertEqual(decode_runtime_tables(tables), plan)
+        self.assertEqual(tables.header.slot_count, 2)
+        self.assertEqual(tables.header.total_slice_count, 4)
+        first = tables.slices[0]
+        self.assertEqual(first.token_ref_start, 0)
+        self.assertEqual((first.m4_iters, first.m2_iters), (0, 1))
+        hot = next(item for item in tables.slices if item.eid == 1)
+        self.assertEqual(hot.token_ref_start, 256)
+        self.assertEqual((hot.m4_iters, hot.m2_iters), (4, 0))
+
+    def test_multislot_compact_lowering_replays_every_event(self) -> None:
+        lowered = lower_schedule_plan(self.plan())
+        replay = replay_static_runner(lowered.runner_program)
+        self.assertEqual(replay.makespan_ticks, lowered.schedule.makespan_ticks)
+        self.assertEqual(
+            {event.key: (event.start_tick, event.end_tick) for event in replay.loads},
+            {
+                event.item.key: (event.start_tick, event.end_tick)
+                for event in lowered.schedule.loads
+            },
+        )
+        self.assertEqual(
+            {event.key: (event.start_tick, event.end_tick) for event in replay.computes},
+            {
+                event.item.key: (event.start_tick, event.end_tick)
+                for event in lowered.schedule.computes
+            },
+        )
+        self.assertEqual(
+            decode_scheduler_words(lowered.runner_program.scheduler_stream),
+            self.plan(),
+        )
+        self.assertEqual(
+            decode_runtime_tables(lowered.runner_program.runtime_tables),
+            self.plan(),
+        )
+
+    def test_runtime_table_enforces_slot_workspace_capacity(self) -> None:
+        with self.assertRaises(ValueError):
+            lower_runtime_tables(
+                self.plan(),
+                layout=RuntimeLayout(slot_token_capacity=1),
+            )
+
+    def test_public_worker_args_are_schedule_level_not_block_level(self) -> None:
+        args = NOuterWorkerArgs(
+            schedule_header_addr=0x1000,
+            static_context_addr=0x2000,
+            runtime_sync_addr=0x3000,
+            cluster_id=0,
+            worker_role=WorkerRole.DMA_SLOT_WORKER,
+        )
+        self.assertEqual(args.cluster_id, 0)
+        self.assertFalse(hasattr(args, "block_id"))
+        self.assertFalse(hasattr(args, "dma_lane_mask"))
+
+    def test_empty_slot_side_is_skipped_without_cross_cluster_wait(self) -> None:
+        plan = SchedulePlan(
+            (
+                GroupPlan((ExpertSlice(0, 0, 2),), (), group_id=0),
+                GroupPlan((), (ExpertSlice(1, 0, 2),), group_id=1),
+            )
+        )
+        c0, c1 = build_schedule_streams(plan)
+        self.assertTrue(all(item.slot_index == 0 for item in c0))
+        self.assertTrue(all(item.slot_index == 1 for item in c1))
+        lowered = lower_schedule_plan(plan)
+        replay = replay_static_runner(lowered.runner_program)
+        self.assertEqual(replay.makespan_ticks, lowered.schedule.makespan_ticks)
+
+    def test_random_multislot_compact_runtime_and_replay_agree(self) -> None:
+        rng = random.Random(0x534C4F54)
+        for schedule_id in range(20):
+            next_eid = 0
+            slots = []
+            for slot_id in range(rng.randint(2, 4)):
+                clusters = []
+                for _cluster in (0, 1):
+                    items = []
+                    for _ in range(rng.randint(0, 3)):
+                        items.append(
+                            ExpertSlice(next_eid, 0, rng.randint(1, 16))
+                        )
+                        next_eid += 1
+                    clusters.append(tuple(items))
+                if not clusters[0] and not clusters[1]:
+                    clusters[rng.randrange(2)] = (
+                        ExpertSlice(next_eid, 0, rng.randint(1, 16)),
+                    )
+                    next_eid += 1
+                slots.append(GroupPlan(clusters[0], clusters[1], slot_id))
+            plan = SchedulePlan(tuple(slots), schedule_id)
+            lowered = lower_schedule_plan(plan)
+            self.assertEqual(
+                decode_scheduler_words(lowered.runner_program.scheduler_stream),
+                plan,
+            )
+            self.assertEqual(
+                decode_runtime_tables(lowered.runner_program.runtime_tables),
+                plan,
+            )
+            self.assertEqual(
+                replay_static_runner(lowered.runner_program).makespan_ticks,
+                lowered.schedule.makespan_ticks,
+            )
 
 
 if __name__ == "__main__":

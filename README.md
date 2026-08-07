@@ -35,7 +35,12 @@ experiments and the frozen comparison baseline.
 
 - `verify_scheduler_rtl_distilled_policy.py`: same-input proof65 and 30K
   validation with checkpoints.
-- `verify_scheduler_rtl_distilled_showcase.py`: directed showcase traces.
+- `evaluate_scheduler_thesis_four_policy.py`: the thesis four-policy
+  comparison and complete action traces.
+- `export_scheduler_showcase_fpga_workloads.py`: per-cluster/per-slot FPGA
+  workload handoff generated from the directed traces.
+- `FPGA_SHOWCASE_WORKLOAD_HANDOFF.md`: execution and field-mapping contract for
+  the FPGA workload agent.
 - `ablate_scheduler_rtl_distilled_structure.py`: structural ablations.
 - `four_stage_scheduler.py` and `run_four_stage_reference.py`: unrestricted
   four-stage reference semantics.

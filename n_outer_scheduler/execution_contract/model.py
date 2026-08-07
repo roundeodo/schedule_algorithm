@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Canonical block-major N-outer execution model.
 
-The dynamic scheduler supplies two complete ordered expert-slice lists.  The
-static workers consume each list in true N-outer order::
+The dynamic scheduler supplies ordered slots, and every slot carries one
+ordered expert-slice list per cluster.  Each cluster consumes its local stream
+in true N-outer order::
 
-    phase -> weight block -> expert slice -> token tile
+    local slot -> phase -> weight block -> expert slice -> token tile
 
-Thus a cluster assigned ``[4, 2a, 2b]`` executes block 0 for all three slices
-before returning to block 1.  A two-entry weight buffer permits the DMA worker
-to load the next stream item while the VersaCore computes the current item.
+There is no global slot barrier.  A cluster that completes its current slot
+may enter its next local slot while the other cluster remains in the prior
+slot.  A two-entry weight buffer permits the DMA worker to load the next
+stream item, including the first item of the next slot, while the VersaCore
+computes the current item.
 
 Time is represented only in scheduler ticks.  One tick is the greatest common
 divisor of every legal default load/compute duration (1408 accelerator cycles).
@@ -139,8 +142,8 @@ class ExpertSlice:
 
 
 @dataclass(frozen=True)
-class GroupPlan:
-    """Complete ordered expert-slice lists for one N-outer group."""
+class SlotPlan:
+    """Complete ordered expert-slice lists for one N-outer slot."""
 
     cluster0: tuple[ExpertSlice, ...]
     cluster1: tuple[ExpertSlice, ...]
@@ -166,6 +169,38 @@ class GroupPlan:
         raise ValueError("cluster must be zero or one")
 
 
+# Compatibility name for earlier single-slot callers.  New multi-slot code
+# should use SlotPlan so a slot is not mistaken for the complete schedule.
+GroupPlan = SlotPlan
+
+
+@dataclass(frozen=True)
+class SchedulePlan:
+    """Ordered N-outer slots; each cluster advances without a global barrier."""
+
+    slots: tuple[SlotPlan, ...]
+    schedule_id: int = 0
+
+    def __post_init__(self) -> None:
+        if self.schedule_id < 0 or not self.slots:
+            raise ValueError("invalid/empty schedule")
+        slot_ids = [slot.group_id for slot in self.slots]
+        if len(slot_ids) != len(set(slot_ids)):
+            raise ValueError("slot group_id values must be unique")
+
+        # A real routed token interval may be split across slots/clusters, but
+        # it must never be executed twice.
+        by_eid: dict[int, list[ExpertSlice]] = {}
+        for slot in self.slots:
+            for item in (*slot.cluster0, *slot.cluster1):
+                by_eid.setdefault(item.eid, []).append(item)
+        for slices in by_eid.values():
+            ordered = sorted(slices, key=lambda item: item.token_start)
+            for left, right in zip(ordered, ordered[1:]):
+                if left.token_end > right.token_start:
+                    raise ValueError("expert slices overlap across slots")
+
+
 @dataclass(frozen=True, order=True)
 class ItemKey:
     cluster: int
@@ -175,6 +210,7 @@ class ItemKey:
 @dataclass(frozen=True)
 class WorkItem:
     key: ItemKey
+    slot_index: int
     phase: Phase
     phase_index: int
     block_id: int
@@ -205,7 +241,7 @@ class ComputeEvent:
 
 @dataclass(frozen=True)
 class ScheduleResult:
-    plan: GroupPlan
+    plan: GroupPlan | SchedulePlan
     streams: tuple[tuple[WorkItem, ...], tuple[WorkItem, ...]]
     loads: tuple[LoadEvent, ...]
     computes: tuple[ComputeEvent, ...]
@@ -248,27 +284,44 @@ def dma_duration_ticks(weight_bytes: int, lanes: DmaMask) -> int:
 def build_streams(
     plan: GroupPlan, config: ContractConfig = ContractConfig()
 ) -> tuple[tuple[WorkItem, ...], tuple[WorkItem, ...]]:
-    """Flatten one group in true block-major N-outer order."""
+    """Flatten one slot in true block-major N-outer order."""
+
+    return build_schedule_streams(SchedulePlan((plan,), plan.group_id), config)
+
+
+def build_schedule_streams(
+    plan: SchedulePlan, config: ContractConfig = ContractConfig()
+) -> tuple[tuple[WorkItem, ...], tuple[WorkItem, ...]]:
+    """Flatten cluster-local ``slot -> phase -> block -> slice`` streams.
+
+    Stream indices remain continuous across slots.  Consequently ping/pong
+    ownership, DMA timelines, and compute timelines are never reset at a slot
+    boundary, and neither cluster waits for the other cluster's slot index.
+    """
 
     streams: list[tuple[WorkItem, ...]] = []
     for cluster in (0, 1):
         items: list[WorkItem] = []
-        experts = plan.experts(cluster)
-        for phase_index, phase in enumerate(config.phases):
-            for block_id in range(phase.block_count):
-                for sequence_index, expert_slice in enumerate(experts):
-                    items.append(
-                        WorkItem(
-                            key=ItemKey(cluster, len(items)),
-                            phase=phase.phase,
-                            phase_index=phase_index,
-                            block_id=block_id,
-                            sequence_index=sequence_index,
-                            expert_slice=expert_slice,
-                            weight_block_bytes=phase.weight_block_bytes,
-                            compute_ticks=expert_slice.compute_ticks(phase),
+        for slot_index, slot in enumerate(plan.slots):
+            experts = slot.experts(cluster)
+            if not experts:
+                continue
+            for phase_index, phase in enumerate(config.phases):
+                for block_id in range(phase.block_count):
+                    for sequence_index, expert_slice in enumerate(experts):
+                        items.append(
+                            WorkItem(
+                                key=ItemKey(cluster, len(items)),
+                                slot_index=slot_index,
+                                phase=phase.phase,
+                                phase_index=phase_index,
+                                block_id=block_id,
+                                sequence_index=sequence_index,
+                                expert_slice=expert_slice,
+                                weight_block_bytes=phase.weight_block_bytes,
+                                compute_ticks=expert_slice.compute_ticks(phase),
+                            )
                         )
-                    )
         streams.append(tuple(items))
     return streams[0], streams[1]
 
@@ -279,8 +332,12 @@ class NOuterSimulator:
     def __init__(self, config: ContractConfig = ContractConfig()):
         self.config = config
 
-    def schedule(self, plan: GroupPlan) -> ScheduleResult:
-        streams = build_streams(plan, self.config)
+    def schedule(self, plan: GroupPlan | SchedulePlan) -> ScheduleResult:
+        streams = (
+            build_streams(plan, self.config)
+            if isinstance(plan, GroupPlan)
+            else build_schedule_streams(plan, self.config)
+        )
         states = [_ClusterState(streams[0]), _ClusterState(streams[1])]
         loads: list[LoadEvent] = []
         computes: list[ComputeEvent] = []
@@ -594,6 +651,12 @@ def validate_schedule(result: ScheduleResult) -> None:
 
 def schedule_group(
     plan: GroupPlan, *, config: ContractConfig = ContractConfig()
+) -> ScheduleResult:
+    return NOuterSimulator(config).schedule(plan)
+
+
+def schedule_plan(
+    plan: SchedulePlan, *, config: ContractConfig = ContractConfig()
 ) -> ScheduleResult:
     return NOuterSimulator(config).schedule(plan)
 

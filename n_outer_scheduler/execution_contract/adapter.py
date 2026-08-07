@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Narrow candidate adapter for the block-major execution contract.
+"""Narrow one-slot candidate adapter for the block-major contract.
 
-PAIR/SINGLE/SPLIT may be used by a search policy to construct the two lists,
-but action boundaries never cross into execution.  Only the completed ordered
-lists are adapted here.
+PAIR/SINGLE/SPLIT may construct the two lists inside one slot.  Search-only
+action bookkeeping does not cross into execution, but selected slot boundaries
+are preserved by :class:`SchedulePlan`.  This helper adapts exactly one slot.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def adapt_completed_candidate(
     *,
     group_id: int = 0,
 ) -> GroupPlan:
-    """Adapt only a completed candidate; no planning epoch is preserved."""
+    """Adapt one completed slot; no search-internal action is preserved."""
 
     return GroupPlan(
         _adapt_sequence(cluster0),

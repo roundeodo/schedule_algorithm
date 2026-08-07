@@ -58,10 +58,29 @@ PROFILE_SPECS = (
 )
 
 
+def _canonicalize_single_lanes(profile: PhysicalProfile) -> PhysicalProfile:
+    """Map every single-lane transfer to its owning cluster's fixed lane.
+
+    IDMA and XDMA have identical duration.  The final policy does not search a
+    lane swap: C2 owns IDMA and C3 owns XDMA.  Explicit BOTH bindings remain
+    physical choices because removing them changes certified schedules.
+    """
+    values = {
+        field: getattr(profile, field)
+        for field in profile.__dataclass_fields__
+    }
+    for prefix, local in (("c2", "IDMA"), ("c3", "XDMA")):
+        for suffix in ("dma_s1", "dma_s3", "s2pf"):
+            field = f"{prefix}_{suffix}"
+            if values[field] in {"IDMA", "XDMA"}:
+                values[field] = local
+    return PhysicalProfile(**values)
+
+
 def _compile_profiles() -> tuple[CandidateProfile, ...]:
     if tuple(PhysicalProfile.__dataclass_fields__) != PROFILE_FIELD_ORDER:
         raise AssertionError("PhysicalProfile field order changed")
-    profiles = tuple(
+    normalized = tuple(
         CandidateProfile(
             logical=LogicalActionSpec(
                 mode=mode,
@@ -69,12 +88,17 @@ def _compile_profiles() -> tuple[CandidateProfile, ...]:
                 selectors=selectors,
                 split_rule=split_rule,
             ),
-            physical=PhysicalProfile(*physical),
+            physical=_canonicalize_single_lanes(PhysicalProfile(*physical)),
         )
         for (mode, family, selectors, split_rule), physical in PROFILE_SPECS
     )
-    if len(profiles) != len(set(profiles)):
-        raise AssertionError("duplicate distilled physical profile")
+    # Four source profiles differ only by a now-forbidden IDMA/XDMA swap.
+    # Stable deduplication removes those aliases from the hard-wired bank.
+    profiles = tuple(dict.fromkeys(normalized))
+    if len(profiles) != 28:
+        raise AssertionError(
+            f"expected 28 canonical fixed-lane profiles, got {len(profiles)}"
+        )
     if any(
         token.logical.mode == "SYNC" and token.logical.family == "SINGLE"
         for token in profiles
